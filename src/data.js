@@ -10,7 +10,7 @@ export function exportBundle({ withApis = false, withFavorites = true } = {}) {
   return {
     app: APP_ID, version: 1, exportedAt: new Date().toISOString(),
     preambles: state.preambles.map(strip), prompts: state.prompts.map(strip), randoms: state.randoms.map(strip),
-    macros: state.macros.map(strip), combos: state.combos.map(strip),
+    macros: state.macros.map(strip), combos: state.combos.map(strip), themes: state.themes.map(strip),
     ...(withFavorites ? { favorites: clone(state.favorites) } : {}),
     ...(withApis ? { apis: clone(state.apis) } : {}),
   };
@@ -30,7 +30,7 @@ const str = (v, max = 20000) => (typeof v === 'string' ? v.slice(0, max) : '');
 const tags = v => (Array.isArray(v) ? v.filter(t => typeof t === 'string' && t.trim()).map(t => t.trim().slice(0, 30)).slice(0, 20) : []);
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 
-/** Float 小剧场的组合：记忆三选一换成聊天上下文；写回记忆、纯裸通道在酒馆里没有对应，丢掉 */
+/** Float 小剧场的组合：记忆三选一换成聊天上下文；写回记忆改成写进聊天的世界书；纯裸通道就是本插件默认的「自己拼」 */
 function normalizeCombo(c) {
   const mem = c.memory || {};
   const context = c.context && typeof c.context === 'object' ? c.context : {
@@ -47,7 +47,9 @@ function normalizeCombo(c) {
       style: ['free', 'vars', 'strict'].includes(o.style) ? o.style : 'free', staged: !!o.staged,
     },
     context: { chat: context.chat === 'none' ? 'none' : 'recent', rounds: num(context.rounds, 12, 1, 100), worldInfo: context.worldInfo !== false, summary: context.summary !== false },
-    who: ['persona', 'custom', 'none'].includes(c.who) ? c.who : 'persona', whoText: str(c.whoText, 2000),
+    who: c.who === 'observer' ? 'none' : ['persona', 'custom', 'none'].includes(c.who) ? c.who : 'persona', whoText: str(c.whoText, 2000),
+    channel: c.channel === 'preset' ? 'preset' : 'own', writeBack: !!c.writeBack,
+    plays: num(c.plays && typeof c.plays === 'object' ? Object.values(c.plays).reduce((a, x) => a + (Number(x) || 0), 0) : c.plays ?? c.useCount, 0, 0, 1e9), lastUsedAt: str(c.lastUsedAt, 40),
     api: typeof c.api === 'string' ? c.api : '', weight: num(c.weight, 1, 0, 100),
   };
 }
@@ -60,6 +62,7 @@ const normalizers = {
     values: Array.isArray(r.values) ? r.values.filter(v => typeof v === 'string').slice(0, 500) : [], min: num(r.min, 1, -1e6, 1e6), max: num(r.max, 10, -1e6, 1e6),
   }),
   combos: normalizeCombo,
+  themes: r => ({ id: str(r.id, 80), name: str(r.name, 40) || '自定义主题', base: str(r.base, 20) || 'magazine', css: str(r.css, 200000), canvasCss: str(r.canvasCss, 100000) }),
   apis: r => ({ id: str(r.id, 80), name: str(r.name, 60), format: ['openai', 'claude', 'gemini'].includes(r.format) ? r.format : 'openai', url: str(r.url, 500), key: str(r.key, 500), model: str(r.model, 200), temperature: num(r.temperature, 1, 0, 2), maxTokens: num(r.maxTokens, 4096, 64, 200000), stream: r.stream !== false }),
 };
 
@@ -68,7 +71,7 @@ export async function importBundle(data) {
   if (!data || typeof data !== 'object') throw new Error('不是有效的导出文件。');
   const idMap = Object.create(null);
   let n = 0;
-  for (const name of ['preambles', 'prompts', 'randoms', 'macros', 'apis', 'combos']) {
+  for (const name of ['preambles', 'prompts', 'randoms', 'macros', 'apis', 'themes', 'combos']) {
     const rows = Array.isArray(data[name]) ? data[name] : [];
     for (const raw of rows) {
       if (!raw || typeof raw !== 'object') continue;
@@ -117,9 +120,18 @@ export function parseTextBlocks(text) {
   return out;
 }
 
-/** 返回 { bundle } 或 { rows: [{title, tags, content}] } 或 { loose: [...] } */
+/** 暗柜「夜间档案」：单个档案、{templateSnapshot} 包着的、或一组 */
+function darkArchives(data) {
+  const one = t => { const src = t && typeof t === 'object' && t.templateSnapshot ? t.templateSnapshot : t; return src && typeof src === 'object' && typeof src.aiInstruction === 'string' && src.aiInstruction.trim() ? src : null; };
+  const list = Array.isArray(data) ? data.map(one) : [one(data)];
+  return list.length && list.every(Boolean) ? list : null;
+}
+
+/** 返回 { bundle } 或 { dark: [...] } 或 { rows: [{title, tags, content}] } 或 { loose: [...] } */
 export function classifyJson(data) {
   if (isOwnBundle(data)) return { bundle: data };
+  const dark = darkArchives(data);
+  if (dark) return { dark };
   if (Array.isArray(data) && data.length && data.every(t => t && typeof t.title === 'string' && typeof t.content === 'string')) {
     return { rows: data.map(t => ({ title: t.title, tags: tags(t.tags), content: t.content })) };
   }
@@ -128,14 +140,54 @@ export function classifyJson(data) {
   return { loose: found };
 }
 
-export function addRows(kind, rows) {
+/** 加进某个库，返回新建的条目 */
+export async function addRows(kind, rows) {
+  const made = [];
   for (const r of rows) {
-    if (kind === 'preambles') state.preambles.push({ id: uid('pre'), name: String(r.title || r.name).slice(0, 60), content: r.content, createdAt: new Date().toISOString() });
-    else state[kind].push({ id: uid(kind.slice(0, 3)), title: String(r.title || r.name).slice(0, 60), tags: r.tags || [], content: r.content, createdAt: new Date().toISOString() });
+    const row = kind === 'preambles'
+      ? { id: uid('pre'), name: String(r.title || r.name).slice(0, 60), content: r.content, createdAt: new Date().toISOString() }
+      : { id: uid(kind.slice(0, 3)), title: String(r.title || r.name).slice(0, 60), tags: r.tags || [], content: r.content, createdAt: new Date().toISOString() };
+    state[kind].push(row);
+    made.push(row);
   }
-  return save(kind);
+  await save(kind);
+  return made;
+}
+
+/** 批量建小剧场：每条提示词各建一个，用默认前置，其余设置走默认 */
+export async function combosFromPrompts(prompts, extra = {}) {
+  const pre = state.settings.defaultPreambleId || state.preambles[0]?.id || '';
+  for (const p of prompts) {
+    const c = normalizeCombo({ name: p.title, tags: p.tags, preambleId: pre, promptIds: [p.id], weight: 1, ...extra });
+    c.id = uid('com');
+    c.createdAt = new Date().toISOString();
+    state.combos.push(c);
+  }
+  await save('combos');
+  return prompts.length;
+}
+
+/** 暗柜档案 → 剧情指令 + 输出契约两条提示词 + 一个小剧场（混排输出） */
+export async function importDarkArchives(list) {
+  let n = 0;
+  for (const src of list) {
+    const title = String(src.title || '暗柜档案').trim().slice(0, 50);
+    const rows = [{ title: `${title} · 剧情指令`, tags: ['暗柜', '场景'], content: String(src.aiInstruction) }];
+    if (typeof src.outputContract === 'string' && src.outputContract.trim()) rows.push({ title: `${title} · 输出契约`, tags: ['暗柜', '形式'], content: src.outputContract });
+    const made = await addRows('prompts', rows);
+    const c = normalizeCombo({
+      name: title, tags: ['暗柜', ...tags(src.tags).slice(0, 4)], preambleId: state.settings.defaultPreambleId || state.preambles[0]?.id || '',
+      promptIds: made.map(r => r.id), output: { mode: 'mixed' }, weight: 2,
+    });
+    c.id = uid('com');
+    c.createdAt = new Date().toISOString();
+    state.combos.push(c);
+    n++;
+  }
+  await save('combos');
+  return n;
 }
 
 export function clearLibrary() {
-  for (const name of LIBRARY) if (name !== 'apis') state[name] = [];
+  for (const name of LIBRARY) if (name !== 'apis' && name !== 'themes') state[name] = [];
 }

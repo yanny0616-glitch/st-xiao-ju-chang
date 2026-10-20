@@ -41,6 +41,7 @@ async function setupData(page) {
     s.seedDefaults(false);
     await s.saveAll();
     c.saveSettingsDebounced();
+    document.dispatchEvent(new CustomEvent('xjc-settings'));
     {
       const fd = new FormData();
       fd.append('ch_name', '林晚');
@@ -161,7 +162,7 @@ async function desktop(browser) {
   await page.click('.xjc-sheet .xjc-seg >> text=HTML');
   await page.check('.xjc-sheet .xjc-toggle:has-text("分两步出") input');
   await page.screenshot({ path: `${SHOTS}/d-04-combo-editor.png` });
-  await page.click('.xjc-sheet-ft >> text=保存');
+  await page.click('.xjc-sheet-ft >> text="保存"');
   await page.click('.xjc-tabs button[data-v="stage"]');
   ok((await page.textContent('.xjc-combo-card .nm')) === '目击帖测试', '新建后成为当前小剧场');
   const n1 = mockCalls().length;
@@ -195,7 +196,7 @@ async function desktop(browser) {
   let sawStreaming = false;
   for (let i = 0; i < 40; i++) {
     const s = await page.textContent('.xjc-result').catch(() => '');
-    if (/正在写…/.test(s) && (await frameText(page, '.xjc-result iframe')).length > 2) { sawStreaming = true; break; }
+    if (/正在演《/.test(s) && (await frameText(page, '.xjc-result iframe')).length > 2) { sawStreaming = true; break; }
     await sleep(100);
   }
   await waitResult(page);
@@ -252,6 +253,96 @@ async function desktop(browser) {
   ok(frameTheme && frameTheme[0] === 'terminal' && frameTheme[1] === 'rgb(15, 20, 17)', `正文 iframe 跟着换（${frameTheme}）`);
   ok((await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.settings.theme)) === 'terminal', '主题存进设置');
   await page.click('.xjc-th[data-v=magazine]');
+
+  // 7c. 新主题、导入 CSS 自定义主题、动效开关
+  await page.click('.xjc-th[data-v=xuan]');
+  ok(await page.evaluate(() => document.querySelector('.xjc-root').dataset.xjcTheme) === 'xuan', '新主题「宣纸」能用');
+  const cssFile = path.join(SHOTS, '测试主题.css');
+  fs.writeFileSync(cssFile, '[data-xjc-custom] { --xjc-ui-bg: rgb(1, 2, 3); --xjc-canvas-bg: rgb(4, 5, 6); }\n/* ===== 正文 CSS（放进小剧场内容的 iframe 里） ===== */\n.xjc-text p { letter-spacing: 3px; }\n');
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('.xjc-btn:has-text("导入 CSS 文件")')]);
+  await chooser.setFiles(cssFile);
+  await page.waitForFunction(() => document.querySelector('.xjc-root').dataset.xjcCustom, null, { timeout: 5000 });
+  await sleep(500);
+  const custom = await page.evaluate(() => ({
+    bg: getComputedStyle(document.querySelector('.xjc-panel')).backgroundColor,
+    base: document.querySelector('.xjc-root').dataset.xjcTheme,
+    style: !!document.getElementById('xjc-custom-css'),
+    tile: !!document.querySelector('.xjc-th.on b')?.textContent.includes('测试主题'),
+  }));
+  ok(custom.style && custom.base === 'xuan' && custom.tile, `导入 CSS 成为自定义主题，基于当前主题（${custom.base}）`);
+  ok(custom.bg.includes('1, 2, 3') || custom.bg.includes('rgb(1, 2, 3)'), `自定义变量生效（面板底色 ${custom.bg}）`);
+  const tailFrame = page.frames().find(f => f.parentFrame() && f.url() === 'about:srcdoc');
+  const frc = await tailFrame?.evaluate(() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.querySelector('.xjc-text p')).letterSpacing]);
+  ok(frc && frc[0] === 'rgb(4, 5, 6)' && frc[1] === '3px', `正文 iframe 用上自定义颜色和正文 CSS（${frc}）`);
+  await page.click('.xjc-th[data-v=magazine]');
+  ok(await page.evaluate(() => !document.getElementById('xjc-custom-css') && !document.querySelector('.xjc-root').dataset.xjcCustom), '切回内置主题后自定义 CSS 撤掉');
+  await page.click('.xjc-toggle:has-text("动效")');
+  ok(await page.evaluate(() => document.body.classList.contains('xjc-motion-off')), '关掉动效');
+  await page.click('.xjc-toggle:has-text("动效")');
+
+  // 7d. 文本批量建小剧场、暗柜档案导入
+  const combos0 = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.combos.length);
+  await page.click('.xjc-tabs button[data-v="library"]');
+  await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("导入")');
+  await page.fill('.xjc-sheet textarea', '## 天台烟花 #场景\n{{char}}和{{user}}在天台等跨年烟花。\n\n## 打工日记 #形式\n用{{char}}的打工日记写今天。');
+  await page.click('.xjc-sheet .xjc-toggle:has-text("每条同时建成一个小剧场")');
+  await page.click('.xjc-sheet .xjc-btn:has-text("导入文本")');
+  await sleep(300);
+  const after = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; return { n: s.combos.length, names: s.combos.map(c => c.name), p: s.prompts.some(p => p.title === '天台烟花') }; });
+  ok(after.n === combos0 + 2 && after.names.includes('打工日记') && after.p, '文本批量导入：两条提示词各建了一个小剧场');
+  const darkFile = path.join(SHOTS, '暗柜.json');
+  fs.writeFileSync(darkFile, JSON.stringify({ templateSnapshot: { title: '午夜电台', tags: ['电台'], aiInstruction: '{{char}}在午夜电台读听众来信。', outputContract: '输出一段电台节目单 HTML。' } }));
+  await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("导入")');
+  const [ch2] = await Promise.all([page.waitForEvent('filechooser'), page.click('.xjc-sheet .xjc-btn:has-text("选文件")')]);
+  await ch2.setFiles(darkFile);
+  await sleep(500);
+  const dark = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.name === '午夜电台'); return c && { n: c.promptIds.length, mode: c.output.mode, tags: c.tags }; });
+  ok(dark && dark.n === 2 && dark.mode === 'mixed' && dark.tags.includes('暗柜'), '暗柜档案导入成两条提示词 + 一个小剧场');
+
+  // 7e. 删提示词时从小剧场里摘掉引用
+  const cleaned = await page.evaluate(async () => {
+    const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state;
+    return s.combos.find(x => x.name === '午夜电台').promptIds[0];
+  });
+  await page.click('.xjc-view[data-view=library] .xjc-seg button:has-text("提示词")');
+  await page.click('.xjc-view[data-view=library] .xjc-item:has-text("午夜电台 · 剧情指令")');
+  await page.click('.xjc-sheet .xjc-btn:has-text("删除")');
+  await page.locator('.xjc-sheet').last().locator('.xjc-btn.danger').click();
+  await sleep(300);
+  const refs = await page.evaluate(async id => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.combos.find(x => x.name === '午夜电台').promptIds.includes(id), cleaned);
+  ok(!refs, '删掉的提示词从小剧场里摘掉了');
+
+  // 7f. 写回记忆（世界书）+ 走酒馆预设
+  await page.evaluate(async () => {
+    const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
+    const c = s.state.combos.find(x => x.id === 'c_store');
+    c.writeBack = true; c.channel = 'preset'; c.output.staged = false;
+    await s.save('combos');
+    await s.setSetting({ currentComboId: 'c_store', api: 'st', writeBackFeature: true });
+  });
+  const before7f = mockCalls().length;
+  await page.click('.xjc-tabs button[data-v="stage"]');
+  await page.click('.xjc-actions .pri');
+  await page.waitForFunction(() => !document.querySelector('.xjc-actions .pri').disabled && document.querySelector('.xjc-result .xjc-ops'), null, { timeout: 30000 });
+  const q = mockCalls().slice(before7f).find(c => JSON.stringify(c.messages).includes('<Brief>'));
+  const qs = q ? JSON.stringify(q.messages) : '';
+  ok(q && !qs.includes('<CharacterSheet>') && qs.includes('林晚是'), '走酒馆预设：材料由酒馆拼（有角色卡、没有插件自己的 <CharacterSheet>）');
+  await sleep(1500);
+  const lore = await page.evaluate(async () => {
+    const c = SillyTavern.getContext();
+    const name = c.chatMetadata.world_info;
+    if (!name) return null;
+    const data = await c.loadWorldInfo(name);
+    return { name, entries: Object.values(data.entries || {}).map(e => e.comment) };
+  });
+  ok(lore && lore.entries.some(t => t.startsWith('小剧场《')), `写回记忆：写进聊天绑定的世界书（${lore && lore.name}）`);
+  await page.evaluate(async () => {
+    const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
+    const c = s.state.combos.find(x => x.id === 'c_store');
+    c.writeBack = false; c.channel = 'own';
+    await s.save('combos');
+    await s.setSetting({ writeBackFeature: false });
+  });
   await page.evaluate(() => window.XiaoJuChang.close());
 
   // 8. 自动出（概率 100）
@@ -365,6 +456,10 @@ async function mobile(browser) {
     failed++;
     console.log('FAIL 异常', e.message.split('\n')[0]);
     console.log(e.stack.split('\n').slice(1, 4).join('\n'));
+    for (const ctx of browser.contexts()) for (const pg of ctx.pages()) {
+      await pg.screenshot({ path: `${SHOTS}/fail.png` }).catch(() => {});
+      console.log('页面状态', await pg.evaluate(() => ({ sheets: document.querySelectorAll('.xjc-sheet').length, top: (() => { const b = document.querySelector('.xjc-tabs button[data-v="stage"]').getBoundingClientRect(); const n = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2); return n && (n.className || n.tagName) + ' ' + (n.id || ''); })() })).catch(x => x.message));
+    }
   }
   await browser.close();
   console.log(failed ? `\n${failed} 项失败` : '\n全部通过');

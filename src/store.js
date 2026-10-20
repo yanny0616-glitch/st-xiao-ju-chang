@@ -5,12 +5,12 @@ import { DEFAULT_PREAMBLES, DEFAULT_PROMPTS, DEFAULT_RANDOMS, DEFAULT_MACROS, DE
 
 const NS = 'xiao-ju-chang';
 const ST_KEY = 'xiaoJuChang';
-export const LIBRARY = ['preambles', 'prompts', 'randoms', 'macros', 'combos', 'apis'];
+export const LIBRARY = ['preambles', 'prompts', 'randoms', 'macros', 'combos', 'apis', 'themes'];
 export const HEAVY = ['favorites', 'recent'];
 
 export const state = {
   settings: clone(DEFAULT_SETTINGS),
-  preambles: [], prompts: [], randoms: [], macros: [], combos: [], apis: [],
+  preambles: [], prompts: [], randoms: [], macros: [], combos: [], apis: [], themes: [],
   favorites: [], recent: [],
 };
 

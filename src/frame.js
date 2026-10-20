@@ -2,6 +2,7 @@
 // 纯文字也进同一种 iframe，配色和字体跟小剧场主题（或选定的画布）
 import { esc } from './util.js';
 import { state } from './store.js';
+import { byId } from './util.js';
 
 const frames = new Map();
 let seq = 0;
@@ -48,19 +49,60 @@ function over(top, bottom) {
 const SANS = "-apple-system,'PingFang SC','Noto Sans CJK SC','Microsoft YaHei',sans-serif";
 const MONO = "ui-monospace,Menlo,Consolas,'DejaVu Sans Mono','Noto Sans Mono CJK SC',monospace";
 const COURIER = "'Courier Prime','Courier New',Courier,'Liberation Mono','Noto Sans Mono CJK SC',monospace";
+const KAITI = "'Kaiti SC','STKaiti','KaiTi','BiauKai','AR PL UKai CN','Noto Serif CJK SC',serif";
 /** 每套主题正文画布的颜色和字体 */
 const THEME_CANVAS = {
   magazine: { bg: '#fbf8f2', ink: '#1c1a17', acc: '#8b2e2e', line: '#d9d1c3', font: SANS },
   sticky: { bg: '#f1ece2', ink: '#2b2622', acc: '#e0572f', line: '#d8cfc0', font: SANS },
   terminal: { bg: '#0f1411', ink: '#cfe7d4', acc: '#7ee787', line: '#213528', font: MONO },
   script: { bg: '#ffffff', ink: '#141414', acc: '#c0392b', line: '#dcdcd6', font: COURIER },
+  night: { bg: '#171a22', ink: '#e6dfcf', acc: '#e3b465', line: '#2c3040', font: "'Songti SC','Noto Serif CJK SC','Noto Serif SC',Georgia,serif" },
+  letter: { bg: '#fffaf6', ink: '#4a3b3b', acc: '#c4686b', line: '#efd9d0', font: KAITI },
+  candy: { bg: '#fffafd', ink: '#4b3f5c', acc: '#ff5f9e', line: '#f6d5e6', font: SANS },
+  xuan: { bg: '#f7f1e3', ink: '#2a2622', acc: '#b23a2a', line: '#d8ccb4', font: KAITI },
 };
+export const BUILTIN_THEMES = [...Object.keys(THEME_CANVAS), 'st'];
 const CANVASES = {
   paper: { bg: '#f6f1e8', ink: '#24211d', acc: '#9a3b2e', line: '#ddd3c2' },
   night: { bg: '#16171c', ink: '#e6e3dc', acc: '#d8a657', line: '#33353d' },
 };
 export const CANVAS_LABEL = { theme: '跟主题', paper: '纸张', night: '夜色' };
-export const themeName = () => (THEME_CANVAS[state.settings.theme] || state.settings.theme === 'st' ? state.settings.theme : 'magazine');
+/** 当前用的自定义主题（settings.theme = 'custom:<id>'），没有就 null */
+export function activeCustom() {
+  const t = String(state.settings.theme || '');
+  return t.startsWith('custom:') ? byId(state.themes || [], t.slice(7)) : null;
+}
+/** 实际套用的内置主题：自定义主题套在它的「基于」上 */
+export function themeName() {
+  const c = activeCustom();
+  const t = c ? c.base : state.settings.theme;
+  return BUILTIN_THEMES.includes(t) ? t : 'magazine';
+}
+/** 给节点打上主题标记；面板、全屏、聊天卡片都用它 */
+export function markTheme(node) {
+  node.dataset.xjcTheme = themeName();
+  const c = activeCustom();
+  if (c) node.dataset.xjcCustom = c.id; else delete node.dataset.xjcCustom;
+}
+/** 自定义主题的面板 CSS 放进 <head>，切走就撤掉 */
+function syncCustomStyle() {
+  let st = document.getElementById('xjc-custom-css');
+  const c = activeCustom();
+  if (!c || !c.css) { st?.remove(); return; }
+  if (!st) { st = document.createElement('style'); st.id = 'xjc-custom-css'; document.head.appendChild(st); }
+  if (st.textContent !== c.css) st.textContent = c.css;
+}
+let probe = null;
+/** 读自定义主题里写的 --xjc-canvas-* 变量 */
+function canvasOverrides() {
+  if (!activeCustom()) return {};
+  if (!probe) { probe = document.createElement('div'); probe.className = 'xjc-probe'; probe.hidden = true; document.body.appendChild(probe); }
+  markTheme(probe);
+  const cs = getComputedStyle(probe);
+  const out = {};
+  for (const k of ['bg', 'ink', 'acc', 'line', 'font']) { const v = cs.getPropertyValue(`--xjc-canvas-${k}`).trim(); if (v) out[k] = v.replace(/"/g, "'"); }
+  return out;
+}
 
 export function themeTokens() {
   const s = state.settings;
@@ -71,8 +113,10 @@ export function themeTokens() {
   const stFont = (cs.getPropertyValue('--mainFontFamily') || getComputedStyle(document.body).fontFamily || 'sans-serif').trim().replace(/"/g, "'");
   const base = THEME_CANVAS[theme];
   const font = base ? base.font : stFont;
-  if (CANVASES[s.canvas]) return { ...CANVASES[s.canvas], font, size, lineHeight, theme };
-  if (base) return { ...base, size, lineHeight, theme };
+  const css = activeCustom()?.canvasCss || '';
+  const over = canvasOverrides();
+  if (CANVASES[s.canvas]) return { ...CANVASES[s.canvas], font: over.font || font, size, lineHeight, theme, css };
+  if (base) return { ...base, ...over, size, lineHeight, theme, css };
   // 「酒馆」主题：酒馆主题色多半是半透明的，iframe 里要实色，叠在一块按文字明暗推出的底色上
   const ink = parseColor(cs.getPropertyValue('--SmartThemeBodyColor')) || { r: 220, g: 220, b: 210, a: 1 };
   const dark = lum(ink) > 0.5;
@@ -85,7 +129,7 @@ export function themeTokens() {
     bg: rgb(bg), ink: rgb({ ...ink, a: 1 }),
     acc: accC ? rgb(accC) : (dark ? '#e0a96d' : '#9a3b2e'),
     line: lineC ? rgb(over(lineC, bg)) : (dark ? '#3a3a40' : '#d9d4c8'),
-    font, size, lineHeight, theme,
+    font, size, lineHeight, theme, css, ...over,
   };
 }
 
@@ -97,7 +141,8 @@ function frameDoc(segments, id, fill) {
   const t = themeTokens();
   const body = segments.map(s => (s.type === 'html' ? `<div class="xjc-html">${s.content}</div>` : `<article class="xjc-text">${textToHtml(s.content)}</article>`)).join('\n');
   const script = 'script';
-  return `<!doctype html><html data-t="${t.theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+  const userCss = String(t.css || '').replace(/<\/style/gi, '<\\/style');
+  return `<!doctype html><html data-t="${t.theme}"${state.settings.motion === false ? ' data-motion="off"' : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 :root{--xjc-bg:${t.bg};--xjc-ink:${t.ink};--xjc-acc:${t.acc};--xjc-line:${t.line};--xjc-font:${t.font}}
 html,body{margin:0;padding:0;background:var(--xjc-bg);color:var(--xjc-ink);font-family:var(--xjc-font);font-size:${t.size}px;line-height:${t.lineHeight};-webkit-text-size-adjust:100%}
 #xjc-content{display:flow-root;padding:${fill ? '14px 16px 48px' : '12px 14px'}}
@@ -115,10 +160,16 @@ html[data-t=sticky] body{font-weight:500}
 html[data-t=terminal] .xjc-text p,html[data-t=script] .xjc-text p{text-align:left}
 html[data-t=terminal] .xjc-text p{padding-left:1.2em;position:relative}
 html[data-t=terminal] .xjc-text p::before{content:"│";position:absolute;left:0;color:var(--xjc-line)}
-</style></head><body><div id="xjc-content">${body}</div>
+html[data-t=night] .xjc-text p{text-indent:2em}
+html[data-t=letter] body{background-image:linear-gradient(90deg,transparent 18px,#f2cfc8 18px 19px,transparent 19px)}
+html[data-t=letter] #xjc-content{padding-left:30px}
+html[data-t=candy] .xjc-text p:first-child::first-line{color:var(--xjc-acc);font-weight:700}
+html[data-t=xuan] .xjc-text p{text-indent:2em}
+html[data-motion=off] *{animation:none!important;transition:none!important}
+</style><style id="xjc-user">${userCss}</style></head><body><div id="xjc-content">${body}</div>
 <${script}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
 if(window.ResizeObserver){new ResizeObserver(send).observe(content)}window.addEventListener("load",send);setInterval(send,700);send();
-window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));if(d.motion===false)r.setAttribute("data-motion","off");else r.removeAttribute("data-motion");var u=document.getElementById("xjc-user");if(u&&typeof d.css==="string")u.textContent=d.css;send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
 document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${script}>
 </body></html>`;
 }
@@ -161,14 +212,15 @@ export function updateReading() {
     try {
       const w = entry.iframe.contentWindow;
       w?.postMessage({ source: 'xjc-parent', type: 'reading', id, size: t.size, lineHeight: t.lineHeight }, '*');
-      w?.postMessage({ source: 'xjc-parent', type: 'theme', id, vars, theme: t.theme }, '*');
+      w?.postMessage({ source: 'xjc-parent', type: 'theme', id, vars, theme: t.theme, css: t.css || '', motion: state.settings.motion !== false }, '*');
     } catch { /* ignore */ }
   }
 }
 
 /** 面板、全屏、聊天里的卡片都带 data-xjc-theme，换主题时一起改 */
 export function applyTheme() {
-  const t = themeName();
-  document.querySelectorAll('[data-xjc-theme]').forEach(n => { n.dataset.xjcTheme = t; });
+  syncCustomStyle();
+  document.querySelectorAll('[data-xjc-theme]').forEach(markTheme);
+  document.body.classList.toggle('xjc-motion-off', state.settings.motion === false);
   updateReading();
 }

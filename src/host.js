@@ -174,3 +174,48 @@ export async function callModel(messages, { target, onChunk, signal } = {}) {
   try { model = c.mainApi === 'openai' ? c.getChatCompletionModel?.() : c.onlineStatus; } catch { /* ignore */ }
   return { text: String(text || ''), model: model && model !== 'no_connection' ? String(model) : '', streamed: false };
 }
+
+/** 「走酒馆预设」：用酒馆自己的生成流程（预设里的破限/文风、角色卡、世界书、聊天记录都由酒馆拼），小剧场只补前置和 <Brief>。不流式 */
+export async function callQuiet(prompt) {
+  const c = ctx();
+  if (typeof c.generateQuietPrompt !== 'function') throw new Error('这个酒馆版本不支持「走酒馆预设」，换回「插件自己拼」。');
+  // 回复长度占掉上下文的话，酒馆会把前面的内容全挤掉；最多给上下文的一半
+  const maxCtx = Number(c.mainApi === 'openai' ? c.chatCompletionSettings?.openai_max_context : c.maxContext) || 0;
+  const want = Math.max(256, Number(state.settings.maxTokens) || 4096);
+  const responseLength = maxCtx ? Math.max(256, Math.min(want, Math.floor(maxCtx / 2))) : want;
+  const text = await c.generateQuietPrompt({ quietPrompt: prompt, responseLength, removeReasoning: true });
+  if (text == null) throw new Error('酒馆没有出结果：先在酒馆里连上 API（插头图标），或者这个小剧场改回「插件自己拼」。');
+  let model = '';
+  try { model = c.mainApi === 'openai' ? c.getChatCompletionModel?.() : c.onlineStatus; } catch { /* ignore */ }
+  return { text: String(text || ''), model: model && model !== 'no_connection' ? String(model) : '', streamed: false };
+}
+
+/** 写回记忆：把这篇的梗概写成一条世界书条目，放进这个聊天绑定的世界书（没有就新建一本并绑上） */
+export async function writeBackToLore(result) {
+  const c = ctx();
+  if (!currentChar()) return;
+  const wi = await import('/scripts/world-info.js');
+  const key = wi.METADATA_KEY || 'world_info';
+  let name = c.chatMetadata?.[key];
+  if (!name) {
+    name = `小剧场记忆 · ${currentChar().name} · ${String(c.getCurrentChatId?.() || Date.now()).slice(-19)}`.replace(/[\\/:*?"<>|]/g, '-');
+    await wi.createNewWorldInfo(name, { interactive: false });
+    c.chatMetadata[key] = name;
+    await c.saveMetadata();
+  }
+  const data = await c.loadWorldInfo(name);
+  if (!data || typeof data !== 'object') throw new Error(`读不到世界书「${name}」。`);
+  data.entries = data.entries || {};
+  const segs = result.segments || [];
+  const text = segs.filter(s => s.type === 'text').map(s => s.content).join('\n') || segs.map(s => String(s.content).replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<[^>]+>/gi, ' ')).join(' ');
+  const gist = text.replace(/\s+/g, ' ').trim().slice(0, 400);
+  if (!gist) return;
+  const entry = wi.createWorldInfoEntry(name, data);
+  Object.assign(entry, {
+    comment: `小剧场《${result.title || '无题'}》`, content: `（小剧场·${result.snapshot?.comboName || ''}）${gist}`,
+    constant: true, key: [], disable: false,
+  });
+  await c.saveWorldInfo(name, data, true);
+  try { c.updateWorldInfoList?.(); } catch { /* ignore */ }
+  return name;
+}

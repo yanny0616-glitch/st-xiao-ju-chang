@@ -1,9 +1,9 @@
 // 生成：组合 → [材料, 前置要求, <Brief>] → 模型 → 切成文字段 / HTML 段
-import { ctx, clone, byId, esc, uid, plain } from './util.js';
+import { ctx, clone, byId, esc, uid, plain, toast } from './util.js';
 import { expandMacros, shuffle } from './macros.js';
 import { state } from './store.js';
 import { MOBILE_HTML_RULES, LENGTH_CHARS, LENGTH_LABEL } from './defaults.js';
-import { buildMaterials, callModel, resolveTarget, userName } from './host.js';
+import { buildMaterials, callModel, callQuiet, writeBackToLore, resolveTarget, userName } from './host.js';
 
 const STYLE_HINT = {
   free: '',
@@ -221,7 +221,16 @@ export function weightedRandomCombo() {
  * 主入口。opts: { extra, uptoIndex, signal, onStream({kind,text,fill}), onShell(result) }
  * 返回结果对象（可直接存进最近/收藏/消息），取消时返回 null
  */
+/** 生成一篇；小剧场开了「写回记忆」就顺手写进聊天的世界书（失败只提示，不影响结果） */
 export async function generateTheater(comboIn, opts = {}) {
+  const result = await generateOnce(comboIn, opts);
+  if (result && !opts.signal?.aborted && state.settings.writeBackFeature && result.comboCopy?.writeBack) {
+    writeBackToLore(result).then(name => { if (name) toast(`已写回世界书「${name}」`); }).catch(e => { console.warn('[小剧场] 写回世界书失败', e); toast(`写回世界书失败：${e.message || e}`); });
+  }
+  return result;
+}
+
+async function generateOnce(comboIn, opts = {}) {
   const combo = captureCombo(comboIn);
   const signal = opts.signal;
   const ctxOpt = combo.context || { chat: 'recent', rounds: 12 };
@@ -230,10 +239,13 @@ export async function generateTheater(comboIn, opts = {}) {
   const pre = comboPreamble(combo);
   const preamble = pre ? expand(pre.content, mctx) : '只输出 <Brief> 要求的内容。';
   const target = resolveTarget(combo.api);
+  // 「走酒馆预设」只对「跟随酒馆当前 API」有效；材料由酒馆自己拼，这里不再重复带
+  const quiet = combo.channel === 'preset' && target === 'st';
   const wantStream = !!opts.onStream && state.settings.streamPreview !== false;
   const cancelled = () => !!signal?.aborted;
 
   const call = async (tasks, kind) => {
+    if (quiet) return callQuiet(`${preamble}\n\n${tasks}`);
     const messages = [
       { role: 'system', content: mat.text },
       { role: 'system', content: preamble },

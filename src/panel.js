@@ -7,17 +7,17 @@ import {
   generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, segmentsOf, kindOf, KIND_LABEL, charCount,
   resultPlainText, contextLabel, postProcess,
 } from './gen.js';
-import { mountFrame, updateReading, applyTheme, themeName, CANVAS_LABEL } from './frame.js';
+import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
   closeTopSheet, confirmSheet, snapshotInfo, openViewer, closeViewer, viewerOpen,
 } from './ui.js';
-import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks, addRows, clearLibrary } from './data.js';
+import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks, addRows, combosFromPrompts, importDarkArchives, clearLibrary } from './data.js';
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { attachToLatest } from './chat.js';
 
 let root = null, panelEl = null, bodyEl = null, kickerEl = null;
-let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', promptFilter = '';
+let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', favFilter = 'all', promptFilter = '';
 const views = {};
 const stageBox = {};
 let busy = null, runSeq = 0;
@@ -35,7 +35,7 @@ function build() {
   root = el('div', 'xjc-root');
   root.hidden = true;
   root.dataset.ttMobileSurface = 'backdrop';
-  root.dataset.xjcTheme = themeName();
+  markTheme(root);
   root.addEventListener('click', e => { if (e.target === root) close(); });
   panelEl = el('div', 'xjc-panel');
   const hd = el('div', 'xjc-hd');
@@ -156,9 +156,10 @@ function comboChips(c) {
   const chip = (k, v) => { const s = el('span', 'xjc-chip'); s.style.cursor = 'default'; s.appendChild(el('b', '', k)); s.appendChild(document.createTextNode(v)); chips.appendChild(s); };
   const titles = (c.promptIds || []).map(id => (byId(state.prompts, id) || {}).title).filter(Boolean);
   chip('提示词', titles.length ? titles.join(' · ') : '无');
-  if (c.random?.count) chip('随机', `抽 ${c.random.count}`);
+  chip('随机', c.random?.count ? `抽 ${c.random.count}${(c.random.include || []).length ? ' · #' + c.random.include.join(' #') : ''}` : '不抽');
   chip('输出', `${{ text: '文字', html: 'HTML', mixed: '混排' }[c.output?.mode] || '文字'}${c.output?.staged && c.output?.mode === 'html' ? ' · 分两步' : ''}`);
-  chip('上下文', contextLabel(c.context));
+  chip('上下文', c.channel === 'preset' ? '走酒馆预设' : contextLabel(c.context));
+  if (c.writeBack && S().writeBackFeature) chip('写回', '世界书');
   chip('出口', targetLabel(resolveTarget(c.api)).replace(/^连接配置 · |^自配 · /, ''));
   return chips;
 }
@@ -234,7 +235,7 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
   const frame = mountFrame(wrap, segs, { onAction: pending ? null : text => continueFrom(result, text) });
   if (!pending) {
     const meta = el('div', 'xjc-meta');
-    meta.append(el('span', '', fmtTime(result.createdAt)), el('span', '', `${charCount(result)} 字${result.model ? ' · ' + result.model : ''}`));
+    meta.append(el('span', '', `${result.characterName ? result.characterName + ' · ' : ''}${fmtTime(result.createdAt)}`), el('span', '', `${charCount(result)} 字 · ${result.comboCopy?.channel === 'preset' ? '走酒馆预设' : contextLabel(snap.context || result.comboCopy?.context)}${result.model ? ' · ' + result.model : ''}`));
     card.appendChild(meta);
     const ops = el('div', 'xjc-ops');
     ops.appendChild(btn('再来一条', () => again(result), 'xjc-btn'));
@@ -316,7 +317,7 @@ export async function run(combo, extra = '') {
   const target = resolveTarget(combo.api);
   const placeholder = { title: combo.name, snapshot: { comboName: combo.name }, segments: [] };
   showResult(placeholder, { pending: true });
-  let phase = '正在写';
+  let phase = `${currentChar()?.name || '角色'} 正在演《${combo.name}》`;
   let words = 0;
   const cancel = () => {
     if (!busy || busy.token !== token) return;
@@ -354,7 +355,7 @@ export async function run(combo, extra = '') {
     state.recent.unshift(result);
     save('recent');
     const c = byId(state.combos, combo.id);
-    if (c) { c.plays = (c.plays || 0) + 1; save('combos'); }
+    if (c) { c.plays = (c.plays || 0) + 1; c.lastUsedAt = result.createdAt; save('combos'); }
     setSetting({ played: (Number(state.settings.played) || 0) + 1 });
     renderKicker();
     showResult(result);
@@ -412,7 +413,8 @@ function libCombos(box) {
   if (!state.combos.length) list.appendChild(el('div', 'xjc-empty', '一个小剧场 = 前置要求 + 几条提示词 + 随机规则 + 输出方式。'));
   for (const c of state.combos) {
     const n = (c.promptIds || []).length;
-    list.appendChild(itemRow(c.name, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${contextLabel(c.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1}${c.plays ? ` · 演过 ${c.plays}` : ''}`));
+    const cur = c.id === state.settings.currentComboId;
+    list.appendChild(itemRow(`${c.name}${cur ? ' · 当前' : ''}`, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${c.channel === 'preset' ? '走酒馆预设' : contextLabel(c.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`));
   }
   box.appendChild(list);
 }
@@ -465,7 +467,7 @@ function libPreambles(box) {
   box.appendChild(row);
   const list = el('div', 'xjc-list');
   list.style.marginTop = '12px';
-  for (const p of state.preambles) list.appendChild(itemRow(p.name, p.content.replace(/\s+/g, ' ').slice(0, 70), () => editText('preambles', p), p.id === state.settings.defaultPreambleId ? '默认' : ''));
+  for (const p of state.preambles) { const used = state.combos.filter(c => c.preambleId === p.id).length; list.appendChild(itemRow(p.name, p.content.replace(/\s+/g, ' ').slice(0, 70), () => editText('preambles', p), [p.id === state.settings.defaultPreambleId ? '默认' : '', used ? `${used} 个小剧场在用` : ''].filter(Boolean).join(' · '))); }
   box.appendChild(list);
   box.appendChild(el('p', 'xjc-hint', '发给模型的顺序：① 材料（角色卡、用户人设、世界书、总结、最近聊天，按小剧场的设置取）② 前置要求 ③ <Brief>（提示词、随机、输出要求）。酒馆预设里的破限、文风、正文格式条目都不会带进来；需要的话写进前置要求。'));
 }
@@ -489,9 +491,20 @@ function editText(kind, row) {
     if (isPre) { def = toggle('设为默认（AI 自选、新建小剧场用它）', row && row.id === state.settings.defaultPreambleId); body.appendChild(def); }
     if (row) {
       foot.appendChild(btn('删除', async () => {
+        if (isPre && state.preambles.length <= 1) { toast('至少留一条前置要求'); return; }
         const used = kind !== 'randoms' ? state.combos.filter(x => (isPre ? x.preambleId === row.id : (x.promptIds || []).includes(row.id))).map(x => x.name) : [];
-        if (!(await confirmSheet('删除', used.length ? `「${used.join('、')}」在用它，删了这些小剧场里就少了这一条。确定删除？` : '确定删除？', '删除', true))) return;
-        remove(kind, row.id);
+        const warn = isPre ? `「${used.join('、')}」在用它，删了之后它们改用第一条前置。确定删除？` : `「${used.join('、')}」在用它，删了这些小剧场里就少了这一条。确定删除？`;
+        if (!(await confirmSheet('删除', used.length ? warn : '确定删除？', '删除', true))) return;
+        await remove(kind, row.id);
+        if (used.length) {
+          const fb = state.preambles[0]?.id || '';
+          for (const x of state.combos) {
+            if (isPre && x.preambleId === row.id) x.preambleId = fb;
+            if (!isPre) x.promptIds = (x.promptIds || []).filter(id => id !== row.id);
+          }
+          if (isPre && state.settings.defaultPreambleId === row.id) setSetting({ defaultPreambleId: fb });
+          save('combos');
+        }
         closeIt(); renderLibrary();
       }, 'xjc-btn danger'));
     }
@@ -538,8 +551,8 @@ function newCombo() {
     id: '', name: '', tags: [], preambleId: s.defaultPreambleId || state.preambles[0]?.id || '', promptIds: [],
     random: { count: 0, include: [], exclude: [] },
     output: { mode: 'text', wrapTag: '', length: 'default', customChars: 900, style: s.defaultStyle || 'free', staged: !!s.stagedDefault },
-    context: { chat: 'recent', rounds: 12, worldInfo: true, summary: true },
-    who: 'persona', whoText: '', api: '', weight: 1,
+    context: { chat: s.defaultChat === 'none' ? 'none' : 'recent', rounds: Number(s.defaultRounds) || 12, worldInfo: s.defaultWorldInfo !== false, summary: s.defaultSummary !== false },
+    who: s.defaultWho || 'persona', whoText: '', api: '', weight: 1, channel: s.defaultChannel === 'preset' ? 'preset' : 'own', writeBack: !!s.writeBackDefault,
   };
 }
 
@@ -579,10 +592,19 @@ function editCombo(row) {
 
     body.appendChild(el('div', 'xjc-sec', '随机'));
     const rc = select([0, 1, 2, 3, 4, 5].map(n => ({ v: String(n), l: n ? `抽 ${n} 条` : '不抽' })), String(d.random.count || 0));
-    const inc = input(tagsToText(d.random.include), '只从这些标签里抽（空 = 全部）');
-    const exc = input(tagsToText(d.random.exclude), '排除这些标签');
     const rtags = allTags(state.randoms);
-    body.append(field('随机池', rc), field('只抽', inc, rtags.length ? `随机池标签：${rtags.join(' ')}` : ''), field('排除', exc));
+    const tagPick = key => {
+      const box = el('div', 'xjc-chips');
+      if (!rtags.length) box.appendChild(el('span', 'xjc-hint', '随机池还没有标签'));
+      for (const t of rtags) {
+        const c = el('button', 'xjc-chip' + ((d.random[key] || []).includes(t) ? ' on' : ''), '#' + t);
+        c.type = 'button';
+        c.onclick = () => { const set = new Set(d.random[key] || []); set.has(t) ? set.delete(t) : set.add(t); d.random[key] = [...set]; c.classList.toggle('on', set.has(t)); };
+        box.appendChild(c);
+      }
+      return box;
+    };
+    body.append(field('随机池', rc, `池里共 ${state.randoms.length} 条`), field('只抽', tagPick('include'), '点选标签；都不选 = 全池'), field('排除', tagPick('exclude'), '带这些标签的不抽'));
 
     body.appendChild(el('div', 'xjc-sec', '输出'));
     const stagedT = toggle('分两步出：先出页面骨架立刻显示，再按占位填字（适合大页面）', d.output.staged);
@@ -606,14 +628,22 @@ function editCombo(row) {
     body.appendChild(g2);
 
     body.appendChild(el('div', 'xjc-sec', '上下文'));
+    const ctxBox = el('div');
+    body.appendChild(field('通道', seg([{ v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], d.channel === 'preset' ? 'preset' : 'own', v => { d.channel = v; ctxBox.hidden = v === 'preset'; }),
+      '自己拼：只带下面勾的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），只对「跟随酒馆当前 API」有效，不能边写边显示。'));
+    body.appendChild(ctxBox);
+    ctxBox.hidden = d.channel === 'preset';
+    const ctxPush = (...nodes) => ctxBox.append(...nodes);
     const rounds = input(d.context.rounds, '', 'number');
     const roundsF = field('带几轮', rounds, '一轮 = 你一句 + TA 一句');
-    body.appendChild(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], d.context.chat, v => { d.context.chat = v; roundsF.hidden = v !== 'recent'; })));
-    body.appendChild(roundsF);
+    ctxPush(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], d.context.chat, v => { d.context.chat = v; roundsF.hidden = v !== 'recent'; })));
+    ctxPush(roundsF);
     roundsF.hidden = d.context.chat !== 'recent';
     const wi = toggle('带世界书（按聊天内容激活，和酒馆一样）', d.context.worldInfo);
     const sm = toggle('带剧情总结（酒馆「总结」扩展的内容）', d.context.summary);
-    body.append(wi, sm);
+    ctxPush(wi, sm);
+    const wb = toggle('写回记忆：生成后把梗概写成一条世界书条目，放进这个聊天绑定的世界书（没有就新建一本）', d.writeBack);
+    if (S().writeBackFeature) body.appendChild(wb);
     const whoText = input(d.whoText, '比如：TA 的新同事');
     const whoF = field('自定身份', whoText);
     body.appendChild(field('我在戏里是谁', seg([{ v: 'persona', l: '我的人设' }, { v: 'custom', l: '自定身份' }, { v: 'none', l: '旁观' }], d.who, v => { d.who = v; whoF.hidden = v !== 'custom'; })));
@@ -629,10 +659,11 @@ function editCombo(row) {
 
     const collect = () => ({
       ...d, id: d.id || uid('c'), name: name.value.trim() || '未命名小剧场', tags: textToTags(tg.value), preambleId: pre.value,
-      random: { count: Number(rc.value) || 0, include: textToTags(inc.value), exclude: textToTags(exc.value) },
+      random: { count: Number(rc.value) || 0, include: [...(d.random.include || [])], exclude: [...(d.random.exclude || [])] },
       output: { ...d.output, length: lenSel.value, customChars: Math.max(50, Number(custom.value) || 900), style: styleSel.value, wrapTag: wrap.value.trim().replace(/[^\w-]/g, ''), staged: stagedT.input.checked },
       context: { ...d.context, rounds: Math.max(1, Math.min(100, Number(rounds.value) || 12)), worldInfo: wi.input.checked, summary: sm.input.checked },
       whoText: whoText.value.trim(), api: api.value, weight: Math.max(0, Number(weight.value) || 0),
+      channel: d.channel === 'preset' ? 'preset' : 'own', writeBack: wb.input.checked,
     });
     if (row) {
       foot.appendChild(btn('删除', async () => {
@@ -641,8 +672,16 @@ function editCombo(row) {
         closeIt(); renderLibrary(); renderPick();
       }, 'xjc-btn danger'));
       foot.appendChild(btn('导出', () => saveFile(JSON.stringify(exportCombo(collect()), null, 2), `小剧场-${row.name}.json`), 'xjc-btn ghost'));
-      foot.appendChild(btn('复制一份', () => { const c = collect(); upsert('combos', { ...c, id: uid('c'), name: c.name + ' 副本', plays: 0 }); closeIt(); renderLibrary(); }, 'xjc-btn ghost'));
+      foot.appendChild(btn('复制一份', () => { const c = collect(); upsert('combos', { ...c, id: uid('c'), name: c.name + ' 副本', plays: 0, lastUsedAt: '' }); closeIt(); renderLibrary(); }, 'xjc-btn ghost'));
     }
+    foot.appendChild(btn('保存并试生成', () => {
+      const c = collect();
+      upsert('combos', c);
+      setSetting({ currentComboId: c.id });
+      closeIt();
+      switchTab('stage');
+      run(byId(state.combos, c.id) || c);
+    }, 'xjc-btn'));
     foot.appendChild(btn('保存', () => {
       const c = collect();
       upsert('combos', c);
@@ -657,8 +696,12 @@ function editCombo(row) {
 function pickPrompts(selected, done) {
   const chosen = new Set(selected);
   openSheet('选提示词', (body, foot, closeIt) => {
-    let filter = '';
+    let filter = '', q = '';
+    const search = input('', '搜标题 / 内容');
+    search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
+    body.appendChild(search);
     const chips = el('div', 'xjc-chips');
+    chips.style.margin = '10px 0';
     const list = el('div');
     const draw = () => {
       chips.innerHTML = '';
@@ -669,7 +712,9 @@ function pickPrompts(selected, done) {
         chips.appendChild(c);
       }
       list.innerHTML = '';
-      for (const p of state.prompts.filter(x => !filter || (x.tags || []).includes(filter))) {
+      const shown = state.prompts.filter(x => (!filter || (x.tags || []).includes(filter)) && (!q || (x.title + x.content).toLowerCase().includes(q)));
+      if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的提示词'));
+      for (const p of shown) {
         const row = el('label', 'xjc-check');
         const cb = el('input');
         cb.type = 'checkbox';
@@ -695,9 +740,19 @@ function pickPrompts(selected, done) {
 // ── 导入 ──
 function importFlow() {
   openSheet('导入', (body, foot, closeIt) => {
-    body.appendChild(el('p', 'xjc-hint', '① 粘贴文本：每条用一行「## 标题 #标签 #标签」开头，下面是内容，导成提示词。② 选文件：本插件导出的、Float 小剧场 APP 导出的直接进库；其它 JSON（酒馆预设、世界书、角色卡、别人的生成器）会把里面像提示词的段落列出来让你挑。'));
+    body.appendChild(el('p', 'xjc-hint', '① 粘贴文本：每条用一行「## 标题 #标签 #标签」开头，下面是内容，可以一次贴很多条。② 选文件：本插件导出的、Float 小剧场 APP 导出的直接进库；暗柜「夜间档案」每份变成两条提示词 + 一个小剧场；其它 JSON（酒馆预设、世界书、角色卡、别人的生成器）会把里面像提示词的段落列出来让你挑。'));
     const ta = textarea('', 8, '## 雨夜便利店 #场景 #日常\n写{{char}}在深夜便利店……\n\n## 弹幕流 #形式 #前端\n输出一段带弹幕滚动的 HTML……');
     body.appendChild(ta);
+    let kind = 'prompts';
+    const asCombo = toggle('每条同时建成一个小剧场（直接能在舞台上选）', false);
+    body.appendChild(field('文本导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; })));
+    body.appendChild(asCombo);
+    const importRows = async rows => {
+      const made = await addRows(kind, rows);
+      let msg = `导入 ${rows.length} 条${{ prompts: '提示词', preambles: '前置要求', randoms: '随机条目' }[kind]}`;
+      if (kind === 'prompts' && asCombo.input.checked) { await combosFromPrompts(made); msg += `，建了 ${made.length} 个小剧场`; }
+      closeIt(); refresh(); toast(msg, 'success');
+    };
     foot.appendChild(btn('选文件', async () => {
       try {
         const f = await pickFile();
@@ -707,48 +762,76 @@ function importFlow() {
         catch {
           const rows = parseTextBlocks(f.text);
           if (!rows.length) throw new Error('文件既不是 JSON，也没有「## 标题」格式的内容。');
-          await addRows('prompts', rows);
-          closeIt(); renderLibrary(); toast(`导入 ${rows.length} 条提示词`, 'success');
+          await importRows(rows);
           return;
         }
-        const kind = classifyJson(data);
-        if (kind.bundle) { const n = await importBundle(kind.bundle); closeIt(); refresh(); toast(`导入 ${n} 条`, 'success'); return; }
-        if (kind.rows) { await addRows('prompts', kind.rows); closeIt(); renderLibrary(); toast(`导入 ${kind.rows.length} 条提示词`, 'success'); return; }
+        const got = classifyJson(data);
+        if (got.bundle) { const n = await importBundle(got.bundle); closeIt(); refresh(); toast(`导入 ${n} 条`, 'success'); return; }
+        if (got.dark) { const n = await importDarkArchives(got.dark); closeIt(); refresh(); toast(`导入 ${n} 份暗柜档案，各建了一个小剧场`, 'success'); return; }
+        if (got.rows) { await importRows(got.rows); return; }
         closeIt();
-        pickLoose(kind.loose);
+        pickLoose(got.loose);
       } catch (e) { fail(e); }
     }, 'xjc-btn'));
     foot.appendChild(btn('导入文本', async () => {
       const rows = parseTextBlocks(ta.value);
       if (!rows.length) { toast('没解析到内容，检查「## 标题」格式'); return; }
-      await addRows('prompts', rows);
-      closeIt(); renderLibrary(); toast(`导入 ${rows.length} 条提示词`, 'success');
+      await importRows(rows);
     }, 'xjc-btn pri'));
   });
 }
 function pickLoose(found) {
   openSheet(`挑要导入的段落（${found.length}）`, (body, foot, closeIt) => {
     const picked = new Set();
-    let kind = 'prompts';
-    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; })));
-    const boxes = [];
-    for (const [i, f] of found.entries()) {
-      const row = el('label', 'xjc-check');
-      const cb = el('input');
-      cb.type = 'checkbox';
-      cb.onchange = () => (cb.checked ? picked.add(i) : picked.delete(i));
-      boxes.push(cb);
-      const mid = el('div', 'xjc-grow');
-      mid.append(el('div', '', f.name), el('div', 'd', f.content));
-      row.append(cb, mid);
-      body.appendChild(row);
+    let kind = 'prompts', q = '';
+    body.appendChild(el('p', 'xjc-hint', `没认出这个格式，把里面像提示词的 ${found.length} 段列出来了。勾上要的；点正文能展开看全文。`));
+    const tagIn = input('', '空格分隔，可空');
+    const tagF = field('统一加标签', tagIn);
+    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; tagF.hidden = v === 'preambles'; })));
+    body.appendChild(tagF);
+    if (found.length > 8) {
+      const search = input('', '搜名字 / 内容');
+      search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
+      body.appendChild(search);
     }
-    foot.appendChild(btn('全选', () => boxes.forEach((cb, i) => { cb.checked = true; picked.add(i); }), 'xjc-btn ghost'));
-    foot.appendChild(btn('导入所选', async () => {
+    const list = el('div');
+    body.appendChild(list);
+    const okBtn = btn('导入', async () => {
       if (!picked.size) { toast('先勾几条'); return; }
-      await addRows(kind, [...picked].map(i => ({ title: found[i].name, content: found[i].content, tags: [] })));
+      const tags = kind === 'preambles' ? [] : textToTags(tagIn.value);
+      await addRows(kind, found.filter((f, i) => picked.has(i)).map(f => ({ title: f.name, content: f.content, tags: [...tags] })));
       closeIt(); renderLibrary(); toast(`导入 ${picked.size} 条`, 'success');
-    }, 'xjc-btn pri'));
+    }, 'xjc-btn pri');
+    const paintOk = () => { okBtn.textContent = picked.size ? `导入 ${picked.size} 条` : '导入'; okBtn.disabled = !picked.size; };
+    const visible = () => [...found.entries()].filter(([, f]) => !q || (f.name + f.content).toLowerCase().includes(q));
+    const draw = () => {
+      list.innerHTML = '';
+      const shown = visible();
+      if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的段落'));
+      for (const [i, f] of shown) {
+        const row = el('label', 'xjc-check');
+        const cb = el('input');
+        cb.type = 'checkbox';
+        cb.checked = picked.has(i);
+        cb.onchange = () => { cb.checked ? picked.add(i) : picked.delete(i); paintOk(); };
+        const mid = el('div', 'xjc-grow');
+        const ex = el('div', 'd', f.content);
+        ex.onclick = e => { e.preventDefault(); ex.classList.toggle('full'); };
+        mid.append(el('div', '', f.name), ex);
+        if (f.path) mid.appendChild(el('div', 'xjc-path', f.path));
+        row.append(cb, mid);
+        list.appendChild(row);
+      }
+      paintOk();
+    };
+    draw();
+    foot.appendChild(btn('全选 / 全不选', () => {
+      const shown = visible().map(([i]) => i);
+      const every = shown.every(i => picked.has(i));
+      shown.forEach(i => (every ? picked.delete(i) : picked.add(i)));
+      draw();
+    }, 'xjc-btn ghost'));
+    foot.appendChild(okBtn);
   });
 }
 
@@ -778,11 +861,24 @@ function renderFav() {
     return;
   }
   if (!state.favorites.length) { box.appendChild(el('div', 'xjc-empty', '还没有收藏。roll 到喜欢的点「♡ 收藏」。')); return; }
+  const html = state.favorites.filter(r => kindOf(r) !== 'text').length;
+  const chips = el('div', 'xjc-chips');
+  for (const o of [{ v: 'all', l: `全部 ${state.favorites.length}` }, { v: 'text', l: `文字型 ${state.favorites.length - html}` }, { v: 'html', l: `前端型 ${html}` }]) {
+    const c = el('button', 'xjc-chip' + (favFilter === o.v ? ' on' : ''), o.l);
+    c.type = 'button';
+    c.onclick = () => { favFilter = o.v; renderFav(); };
+    chips.appendChild(c);
+  }
+  box.appendChild(chips);
   const list = el('div', 'xjc-list');
-  for (const f of [...state.favorites].reverse()) {
+  list.style.marginTop = '12px';
+  const shown = [...state.favorites].reverse().filter(r => favFilter === 'all' || (favFilter === 'html' ? kindOf(r) !== 'text' : kindOf(r) === 'text'));
+  if (!shown.length) list.appendChild(el('div', 'xjc-empty', '这一类还没有收藏。'));
+  for (const f of shown) {
     list.appendChild(resultItem(f, () => openViewer(f, {
       actions: [
         { label: '按这套再来', run: r => { again(r); return false; } },
+        { label: '放到舞台', run: r => { open('stage'); showResult(r); return false; } },
         { label: '复制', run: async r => { toast((await copyText(`${r.title}\n\n${resultPlainText(r)}`)) ? '已复制' : '复制失败'); return true; } },
         { label: '取消收藏', run: r => { toggleFavorite(r); renderFav(); return false; } },
       ],
@@ -819,6 +915,21 @@ function setGen(box) {
   style.onchange = () => setSetting({ defaultStyle: style.value });
   box.appendChild(field('新建小剧场的 HTML 风格', style));
   box.appendChild(toggle('新建小剧场默认「分两步出」', S().stagedDefault, v => setSetting({ stagedDefault: v })));
+  box.appendChild(el('div', 'xjc-sec', '新建小剧场的默认值'));
+  const roundsIn = input(S().defaultRounds, '', 'number');
+  roundsIn.onchange = () => setSetting({ defaultRounds: Math.max(1, Math.min(100, Number(roundsIn.value) || 12)) });
+  const roundsF = field('带几轮', roundsIn);
+  box.appendChild(field('我在戏里是谁', seg([{ v: 'persona', l: '我的人设' }, { v: 'custom', l: '自定身份' }, { v: 'none', l: '旁观' }], S().defaultWho || 'persona', v => setSetting({ defaultWho: v }))));
+  box.appendChild(field('通道', seg([{ v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], S().defaultChannel || 'own', v => setSetting({ defaultChannel: v }))));
+  box.appendChild(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], S().defaultChat || 'recent', v => { setSetting({ defaultChat: v }); roundsF.hidden = v !== 'recent'; })));
+  box.appendChild(roundsF);
+  roundsF.hidden = (S().defaultChat || 'recent') !== 'recent';
+  box.appendChild(toggle('带世界书', S().defaultWorldInfo !== false, v => setSetting({ defaultWorldInfo: v })));
+  box.appendChild(toggle('带剧情总结', S().defaultSummary !== false, v => setSetting({ defaultSummary: v })));
+  if (S().writeBackFeature) box.appendChild(toggle('写回记忆（写进聊天的世界书）', !!S().writeBackDefault, v => setSetting({ writeBackDefault: v })));
+  box.appendChild(el('div', 'xjc-sec', '可选功能'));
+  box.appendChild(toggle('写回记忆：小剧场里多一个开关，开了的那篇生成后把梗概写进这个聊天绑定的世界书，之后聊天时模型会记得（默认关）', !!S().writeBackFeature, v => { setSetting({ writeBackFeature: v }); renderSettings(); }));
+  box.appendChild(el('div', 'xjc-sec', '最近'));
   const keep = input(S().recentKeep, '', 'number');
   keep.onchange = () => { setSetting({ recentKeep: Math.max(0, Math.min(100, Number(keep.value) || 0)) }); save('recent'); };
   box.appendChild(field('「最近」保留几篇', keep, '没收藏的结果只保留这么多，旧的自动丢掉。'));
@@ -954,31 +1065,163 @@ const THEMES = [
   { v: 'sticky', l: '便签墙', d: '彩色便签 · 胶带', pv: 'stk' },
   { v: 'terminal', l: '终端', d: '黑底绿字 · 等宽', pv: 'trm' },
   { v: 'script', l: '剧本', d: '打字机 · 装订孔', pv: 'scr' },
+  { v: 'night', l: '夜读', d: '深蓝夜色 · 琥珀灯', pv: 'ngt' },
+  { v: 'letter', l: '信笺', d: '粉笺楷体 · 邮戳', pv: 'ltr' },
+  { v: 'candy', l: '糖果', d: '马卡龙 · 圆角', pv: 'cdy' },
+  { v: 'xuan', l: '宣纸', d: '米黄宣纸 · 朱印', pv: 'xun' },
   { v: 'st', l: '酒馆', d: '跟你的酒馆 UI 主题', pv: 'st' },
 ];
+const themeLabel = v => (THEMES.find(t => t.v === v) || {}).l || v;
+
+/** 自定义主题的起始模板：把「基于」那套的颜色填进变量，改数值就能换色 */
+function themeTemplate(base) {
+  const probe = el('div', 'xjc-viewer');
+  probe.dataset.xjcTheme = base;
+  probe.hidden = true;
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const vals = {};
+  for (const k of ['bg', 'chat', 'ink', 'line', 'acc', 'on']) vals[`--xjc-ui-${k}`] = cs.getPropertyValue(`--xjc-ui-${k}`).trim() || 'inherit';
+  probe.remove();
+  const v = k => vals[k];
+  return `/* 自定义主题。改下面的变量就能换配色；也可以写任何 CSS，
+   选择器前面加 [data-xjc-custom] 就只作用于小剧场（面板、全屏、聊天里的卡片）。 */
+[data-xjc-custom] {
+  --xjc-ui-bg: ${v('--xjc-ui-bg')};      /* 面板底色 */
+  --xjc-ui-chat: ${v('--xjc-ui-chat')};    /* 卡片、输入框底色 */
+  --xjc-ui-ink: ${v('--xjc-ui-ink')};     /* 文字 */
+  --xjc-ui-line: ${v('--xjc-ui-line')};    /* 细线、边框 */
+  --xjc-ui-acc: ${v('--xjc-ui-acc')};     /* 强调色 */
+  --xjc-ui-on: ${v('--xjc-ui-on')};      /* 强调色上的文字 */
+  /* 正文（小剧场内容）的颜色，不写就跟「基于」的主题 */
+  /* --xjc-canvas-bg: #ffffff; --xjc-canvas-ink: #222; --xjc-canvas-acc: #c00; --xjc-canvas-line: #ddd; */
+  /* --xjc-canvas-font: "Kaiti SC", KaiTi, serif; */
+}
+/* 例：去掉底纹
+[data-xjc-custom] .xjc-panel { background-image: none; } */
+/* 例：换报头字体
+[data-xjc-custom] .xjc-hd h2 { font-family: "Kaiti SC", KaiTi, serif; } */
+`;
+}
+const CANVAS_SPLIT = '/* ===== 正文 CSS（放进小剧场内容的 iframe 里） ===== */';
+function themeToCss(t) {
+  return `/* xjc-theme ${JSON.stringify({ name: t.name, base: t.base })} */\n${t.css || ''}\n\n${CANVAS_SPLIT}\n${t.canvasCss || ''}\n`;
+}
+function cssToTheme(text, fallbackName) {
+  const head = String(text).match(/^\s*\/\*\s*xjc-theme\s+(\{.*?\})\s*\*\//);
+  let meta = {};
+  if (head) { try { meta = JSON.parse(head[1]); } catch { /* ignore */ } }
+  let body = head ? String(text).slice(head[0].length) : String(text);
+  let canvasCss = '';
+  const i = body.indexOf(CANVAS_SPLIT);
+  if (i >= 0) { canvasCss = body.slice(i + CANVAS_SPLIT.length).trim(); body = body.slice(0, i); }
+  return { id: uid('th'), name: String(meta.name || fallbackName || '导入的主题').slice(0, 40), base: BUILTIN_THEMES.includes(meta.base) ? meta.base : themeName(), css: body.trim(), canvasCss };
+}
+function useTheme(v) { setSetting({ theme: v }); applyTheme(); }
+
+function editTheme(row) {
+  const d = row ? clone(row) : { id: uid('th'), name: '我的主题', base: themeName(), css: themeTemplate(themeName()), canvasCss: '' };
+  const before = state.settings.theme;
+  openSheet(row ? `编辑主题「${row.name}」` : '新建主题', (body, foot, closeIt) => {
+    const name = input(d.name, '主题名字');
+    body.appendChild(field('名字', name));
+    const base = select(THEMES.map(t => ({ v: t.v, l: t.l })), d.base);
+    body.appendChild(field('基于', base, '先套用这套内置主题的样子，再叠上你的 CSS。'));
+    const css = textarea(d.css, 14);
+    css.classList.add('xjc-code');
+    body.appendChild(field('面板 CSS', css, '作用于面板、全屏查看和聊天里挂的小剧场卡片。'));
+    const ccss = textarea(d.canvasCss, 6, '比如：.xjc-text p { text-indent: 2em; }  p:first-child::first-letter { color: var(--xjc-acc); }');
+    ccss.classList.add('xjc-code');
+    body.appendChild(field('正文 CSS（可空）', ccss, '放进小剧场内容的 iframe 里：纯文字段落是 .xjc-text p，AI 写的 HTML 在 .xjc-html 里。可用 --xjc-bg --xjc-ink --xjc-acc --xjc-line --xjc-font。'));
+    body.appendChild(btn('用「基于」的颜色重新生成模板', () => { css.value = themeTemplate(base.value); }, 'xjc-btn sm'));
+    const collect = () => ({ ...d, name: name.value.trim() || '我的主题', base: base.value, css: css.value, canvasCss: ccss.value });
+    // 边改边看：先当成当前主题套上，取消就换回原来的
+    let previewing = false;
+    const preview = () => {
+      const t = collect();
+      const i = state.themes.findIndex(x => x.id === t.id);
+      if (i >= 0) state.themes[i] = { ...state.themes[i], ...t }; else { state.themes.push({ ...t, draft: true }); }
+      state.settings.theme = `custom:${t.id}`;
+      previewing = true;
+      applyTheme();
+    };
+    let timer = 0;
+    for (const n of [css, ccss, name]) n.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(preview, 400); });
+    base.addEventListener('change', preview);
+    if (row) {
+      foot.appendChild(btn('删除', async () => {
+        if (!(await confirmSheet('删除主题', `删除「${row.name}」？`, '删除', true))) return;
+        state.themes = state.themes.filter(x => x.id !== row.id);
+        await save('themes');
+        previewing = false;
+        if (String(state.settings.theme) === `custom:${row.id}` || before === `custom:${row.id}`) useTheme(row.base || 'magazine');
+        closeIt(); renderSettings();
+      }, 'xjc-btn danger'));
+      foot.appendChild(btn('导出 .css', () => saveFile(themeToCss(collect()), `小剧场主题-${collect().name}.css`, 'text/css'), 'xjc-btn ghost'));
+    }
+    foot.appendChild(btn('保存并使用', async () => {
+      const t = collect();
+      delete t.draft;
+      const i = state.themes.findIndex(x => x.id === t.id);
+      if (i >= 0) state.themes[i] = t; else state.themes.push(t);
+      await save('themes');
+      previewing = false;
+      useTheme(`custom:${t.id}`);
+      closeIt(); renderSettings(); toast('主题已保存', 'success');
+    }, 'xjc-btn pri'));
+  }, () => {
+    // 关掉没保存：撤回预览
+    if (!previewing) return;
+    state.themes = state.themes.filter(x => !x.draft);
+    if (row) { const i = state.themes.findIndex(x => x.id === row.id); if (i >= 0) state.themes[i] = row; }
+    state.settings.theme = before;
+    applyTheme();
+  });
+}
+async function importThemeCss() {
+  const f = await pickFile('.css,text/css,text/plain');
+  if (!f) return;
+  const t = cssToTheme(f.text, f.name.replace(/\.(css|txt)$/i, ''));
+  if (!t.css && !t.canvasCss) { toast('这个文件是空的'); return; }
+  state.themes.push(t);
+  await save('themes');
+  useTheme(`custom:${t.id}`);
+  renderSettings();
+  toast(`导入主题「${t.name}」并已套用`, 'success');
+}
 function setLook(box) {
   const reread = () => { updateReading(); };
   const grid = el('div', 'xjc-themes');
-  for (const t of THEMES) {
-    const b = el('button', 'xjc-th' + (themeName() === t.v ? ' on' : ''));
+  const cur = String(state.settings.theme || '');
+  const tile = (v, label, desc, pv) => {
+    const b = el('button', 'xjc-th' + (cur === v || (!activeCustom() && v === themeName() && !cur.startsWith('custom:')) ? ' on' : ''));
     b.type = 'button';
-    b.dataset.v = t.v;
-    b.append(el('div', `pv pv-${t.pv}`), el('b', '', t.l), el('span', '', t.d));
+    b.dataset.v = v;
+    b.append(el('div', `pv pv-${pv}`), el('b', '', label), el('span', '', desc));
     b.onclick = () => {
-      setSetting({ theme: t.v });
+      useTheme(v);
       grid.querySelectorAll('.xjc-th').forEach(x => x.classList.toggle('on', x === b));
-      applyTheme();
+      renderSettings();
     };
     grid.appendChild(b);
-  }
+  };
+  for (const t of THEMES) tile(t.v, t.l, t.d, t.pv);
+  for (const t of state.themes) tile(`custom:${t.id}`, t.name, `自定义 · 基于${themeLabel(t.base)}`, (THEMES.find(x => x.v === t.base) || THEMES[0]).pv);
   box.appendChild(field('主题', grid, '面板、正文、全屏和聊天里挂的小剧场一起换。'));
+  const trow = el('div', 'xjc-row');
+  trow.style.margin = '-4px 0 14px';
+  trow.append(btn('＋ 新建自定义主题', () => editTheme(null), 'xjc-btn sm'), btn('导入 CSS 文件', () => importThemeCss().catch(fail), 'xjc-btn sm'));
+  const ac = activeCustom();
+  if (ac) trow.appendChild(btn(`编辑「${ac.name}」`, () => editTheme(ac), 'xjc-btn sm pri'));
+  box.appendChild(trow);
+  box.appendChild(toggle('动效（抽屉滑入、生成时的转圈和闪烁光标）', S().motion !== false, v => { setSetting({ motion: v }); applyTheme(); }));
   box.appendChild(field('小剧场字号', seg([{ v: 0.9, l: '小' }, { v: 1, l: '标准' }, { v: 1.1, l: '大' }, { v: 1.2, l: '特大' }].map(x => ({ v: String(x.v), l: x.l })), String(S().fontScale), v => { setSetting({ fontScale: Number(v) }); reread(); })));
   box.appendChild(field('行距', seg([{ v: 'tight', l: '紧' }, { v: 'mid', l: '适中' }, { v: 'loose', l: '松' }], S().lineHeight, v => { setSetting({ lineHeight: v }); reread(); })));
   box.appendChild(field('正文底色', seg(Object.entries(CANVAS_LABEL).map(([v, l]) => ({ v, l })), S().canvas, v => { setSetting({ canvas: v }); reread(); }), '正文的底色和文字色，默认跟着主题走。AI 写的 HTML 用 --xjc-bg 等变量就能配色一致。'));
 }
 
 function setData(box) {
-  box.appendChild(el('p', 'xjc-hint', `存在：${backendName()}。`));
+  box.appendChild(el('p', 'xjc-hint', `${state.combos.length} 个小剧场 · ${state.prompts.length} 条提示词 · ${state.randoms.length} 条随机 · ${state.macros.length} 个宏 · ${state.preambles.length} 条前置 · ${state.themes.length} 个自定义主题 · ${state.favorites.length} 收藏 · ${state.recent.length} 最近。存在：${backendName()}。`));
   box.appendChild(el('div', 'xjc-sec', '导出'));
   const withFav = toggle('包含收藏', true);
   const withApi = toggle('包含 API 配置（含密钥，别发给别人）', false);
@@ -1000,9 +1243,15 @@ function setData(box) {
     btn('清空最近', async () => { if (await confirmSheet('清空最近', '没收藏的结果都会删掉。', '清空', true)) { state.recent = []; save('recent'); toast('已清空'); } }, 'xjc-btn'),
     btn('清空收藏', async () => { if (await confirmSheet('清空收藏', `删掉全部 ${state.favorites.length} 条收藏？`, '清空', true)) { state.favorites = []; save('favorites'); toast('已清空'); } }, 'xjc-btn danger'),
     btn('重置库', async () => {
-      if (!(await confirmSheet('重置库', '小剧场、提示词、随机、前置全部恢复成默认（收藏、最近、API 保留）。', '重置', true))) return;
+      if (!(await confirmSheet('重置库', '小剧场、提示词、随机、前置全部恢复成默认（收藏、最近、API、自定义主题保留）。', '重置', true))) return;
       clearLibrary(); seedDefaults(false); state.settings = { ...clone(DEFAULT_SETTINGS), api: state.settings.api, tail: state.settings.tail, seeded: true };
       await saveAll(); toast('已重置'); renderSettings();
+    }, 'xjc-btn danger'),
+    btn('重置全部', async () => {
+      if (!(await confirmSheet('重置全部', '库、收藏、最近、自定义主题、设置全部删掉，重新放进默认库。自配 API 保留。确定？', '全部重置', true))) return;
+      clearLibrary(); state.themes = []; state.favorites = []; state.recent = []; current = null; stageBox.result.innerHTML = '';
+      seedDefaults(false); state.settings = { ...clone(DEFAULT_SETTINGS), seeded: true };
+      await saveAll(); applyTheme(); document.dispatchEvent(new CustomEvent('xjc-settings')); toast('已全部重置'); renderSettings();
     }, 'xjc-btn danger'),
   );
   box.appendChild(r2);

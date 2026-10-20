@@ -3,7 +3,7 @@
 import { ctx, el, uid, byId, toast, fail, copyText } from './util.js';
 import { state, save } from './store.js';
 import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, resultPlainText, KIND_LABEL, kindOf } from './gen.js';
-import { mountFrame, themeName } from './frame.js';
+import { mountFrame, markTheme } from './frame.js';
 import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
 import { isFavorite, toggleFavorite } from './favs.js';
@@ -95,7 +95,7 @@ async function confirmDelete() {
 function tailCard(mesId, theater) {
   const card = el('div', 'xjc-tail-card');
   card.dataset.id = theater.id;
-  card.dataset.xjcTheme = themeName();
+  markTheme(card);
   const hd = el('div', 'xjc-tail-hd');
   const ttl = el('div', 'ttl');
   ttl.innerHTML = '<b><i class="fa-solid fa-masks-theater"></i> 小剧场</b>';
@@ -165,7 +165,7 @@ export function renderTail(mesId) {
   if (!list.length && !job) { box?.remove(); return; }
   if (!box) {
     box = el('div', 'xjc-tail');
-    box.dataset.xjcTheme = themeName();
+    markTheme(box);
     const text = node.querySelector('.mes_text');
     if (text) text.after(box); else node.querySelector('.mes_block')?.appendChild(box);
   }

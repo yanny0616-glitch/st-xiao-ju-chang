@@ -1,11 +1,12 @@
 // 表单控件、面板内抽屉、确认框、全屏查看器
 import { el, btn, esc, fmtTime } from './util.js';
-import { mountFrame, themeName } from './frame.js';
+import { mountFrame, markTheme } from './frame.js';
 import { segmentsOf, contextLabel, KIND_LABEL, kindOf, charCount } from './gen.js';
 import { targetLabel } from './host.js';
 
 export function field(label, control, hint) {
-  const w = el('label', 'xjc-field');
+  // 只有单个输入框才用 <label>；包着一排按钮时点标题会误触第一个按钮
+  const w = el(/^(INPUT|SELECT|TEXTAREA)$/.test(control.tagName) ? 'label' : 'div', 'xjc-field');
   w.appendChild(el('span', 'lb', label));
   w.appendChild(control);
   if (hint) w.appendChild(el('p', 'xjc-hint', hint));
@@ -142,7 +143,7 @@ export function openViewer(result, { actions = [], onAction } = {}) {
   closeViewer();
   const root = el('div', 'xjc-viewer');
   root.dataset.ttMobileSurface = 'backdrop';
-  root.dataset.xjcTheme = themeName();
+  markTheme(root);
   const bar = el('div', 'xjc-viewer-bar');
   bar.appendChild(btn('‹ 返回', closeViewer, 'xjc-btn ghost sm'));
   bar.appendChild(el('div', 'ttl', result.title || '小剧场'));
