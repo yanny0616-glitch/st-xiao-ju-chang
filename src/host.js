@@ -198,6 +198,54 @@ async function drain(gen, onChunk, signal) {
   return text;
 }
 
+// ── 跟随酒馆当前 API（聊天补全）时自己发流式请求 ──
+// 酒馆的 generateRaw / 静默生成从不流式，一篇写两三百秒时中间的反代、中转站会先超时（504）；流式一直有数据在走就不会。
+// 请求参数用酒馆自己的 createGenerationParameters 按当前连接拼（源、模型、采样、反代、密钥都走酒馆后端），只把 stream 打开
+let stMods = null;
+async function stModules() {
+  if (stMods !== null) return stMods;
+  try {
+    const [oai, sse] = await Promise.all([import('/scripts/openai.js'), import('/scripts/sse-stream.js')]);
+    stMods = typeof oai.createGenerationParameters === 'function' && typeof oai.getStreamingReply === 'function' && typeof sse.getEventSourceStream === 'function' ? { oai, sse } : false;
+  } catch { stMods = false; }
+  return stMods;
+}
+/** 当前能不能用流式（聊天补全 + 酒馆版本里有那几个函数） */
+async function canStreamSt() {
+  return ctx().mainApi === 'openai' && !!(await stModules());
+}
+const errorOf = (raw, status) => {
+  let j = null;
+  try { j = JSON.parse(raw); } catch { /* ignore */ }
+  const m = j?.error?.message || j?.message || (typeof j?.error === 'string' ? j.error : '') || String(raw || '').slice(0, 200);
+  return new Error(m ? `${m}（${status}）` : `请求失败（${status}）`);
+};
+async function streamSt(messages, { maxTokens, onChunk, signal }) {
+  const c = ctx();
+  const { oai, sse } = await stModules();
+  const model = oai.getChatCompletionModel(oai.oai_settings);
+  const { generate_data } = await oai.createGenerationParameters(oai.oai_settings, model, 'quiet', messages);
+  generate_data.stream = true;
+  generate_data.max_tokens = maxTokens;
+  await c.eventSource.emit(c.eventTypes.CHAT_COMPLETION_SETTINGS_READY, generate_data);
+  const res = await fetch('/api/backends/chat-completions/generate', { method: 'POST', headers: c.getRequestHeaders(), body: JSON.stringify(generate_data), signal });
+  if (!res.ok) throw errorOf(await res.text(), res.status);
+  const reader = res.body.pipeThrough(sse.getEventSourceStream()).getReader();
+  const st = { reasoning: '', images: [], signature: '', toolSignatures: {} };
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done || value?.data === '[DONE]') break;
+    let parsed;
+    try { parsed = JSON.parse(value.data); } catch { continue; }
+    if (parsed?.error) throw errorOf(value.data, res.status);
+    // 思维链不算正文（overrideShowThoughts: false）
+    text += oai.getStreamingReply(parsed, st, { overrideShowThoughts: false }) || '';
+    onChunk?.(text);
+  }
+  return { text, model: model ? String(model) : '' };
+}
+
 /**
  * 发一次请求。messages 是 [{role, content}]。
  * opts: { target, onChunk, signal } → { text, model, streamed }
@@ -211,7 +259,8 @@ export async function callModel(messages, { target, onChunk, signal } = {}) {
     if (!api) throw new Error('这个自配 API 已被删除。');
     if (!api.model) throw new Error(`「${api.name || '自配 API'}」还没填模型。`);
     if (api.format === 'openai' && !api.url) throw new Error(`「${api.name || '自配 API'}」还没填地址。`);
-    const stream = api.stream !== false && !!onChunk;
+    // 流式不只是为了边写边显示：一直有数据在走，长篇不会被中转站超时掐断
+    const stream = api.stream !== false;
     const payload = payloadFor(api, { messages, stream, max_tokens: Number(api.maxTokens) || maxTokens });
     const res = await c.ChatCompletionService.processRequest(payload, {}, true, signal);
     const text = typeof res === 'function' ? await drain(res, onChunk, signal) : (res?.content ?? '');
@@ -221,13 +270,17 @@ export async function callModel(messages, { target, onChunk, signal } = {}) {
     const id = t.slice(8);
     const svc = c.ConnectionManagerRequestService;
     if (!svc) throw new Error('当前酒馆没有连接配置功能，换个出口。');
-    const stream = !!onChunk;
+    const stream = true;
     const res = await svc.sendRequest(id, messages, maxTokens, { stream, signal, extractData: true, includePreset: true, includeInstruct: true });
     const text = typeof res === 'function' ? await drain(res, onChunk, signal) : (res?.content ?? '');
     const profile = (c.extensionSettings?.connectionManager?.profiles || []).find(p => p.id === id);
     return { text, model: profile?.model || '', streamed: stream };
   }
-  // 跟随酒馆：generateRaw 不带预设里的提示词条目，只用当前 API 和采样参数；不流式
+  // 跟随酒馆：不带预设里的提示词条目，只用当前 API 和采样参数。聊天补全自己发流式；文本补全还是 generateRaw（不流式）
+  if (await canStreamSt()) {
+    const r = await streamSt(messages, { maxTokens, onChunk, signal });
+    return { ...r, streamed: true };
+  }
   const text = await c.generateRaw({ prompt: messages, responseLength: maxTokens, trimNames: false });
   let model = '';
   try { model = c.mainApi === 'openai' ? c.getChatCompletionModel?.() : c.onlineStatus; } catch { /* ignore */ }
@@ -235,7 +288,7 @@ export async function callModel(messages, { target, onChunk, signal } = {}) {
 }
 
 /** 「走酒馆预设」：用酒馆自己的生成流程（预设里的破限/文风、角色卡、世界书、聊天记录都由酒馆拼），小剧场只补前置和 <Brief>。不流式 */
-export async function callQuiet(prompt) {
+export async function callQuiet(prompt, { onChunk, signal } = {}) {
   const c = ctx();
   if (typeof c.generateQuietPrompt !== 'function') throw new Error('这个酒馆版本不支持「走酒馆预设」，换回「插件自己拼」。');
   // 回复长度占掉上下文的话，酒馆会把前面的内容全挤掉；最多给上下文的一半
@@ -249,6 +302,19 @@ export async function callQuiet(prompt) {
   const onText = d => { if (d && !d.dryRun && typeof d.prompt === 'string') got.messages = [{ role: 'prompt', content: d.prompt }]; };
   if (ev.CHAT_COMPLETION_PROMPT_READY) c.eventSource.on(ev.CHAT_COMPLETION_PROMPT_READY, onChat);
   if (ev.GENERATE_AFTER_COMBINE_PROMPTS) c.eventSource.on(ev.GENERATE_AFTER_COMBINE_PROMPTS, onText);
+  // 聊天补全：先让酒馆按预设拼一遍（dryRun，不真的发），拿到拼好的那份自己流式发
+  if (await canStreamSt() && typeof c.generate === 'function') {
+    let chat = null;
+    const cap = d => { if (d && d.dryRun && Array.isArray(d.chat)) chat = d.chat; };
+    c.eventSource.on(ev.CHAT_COMPLETION_PROMPT_READY, cap);
+    try { await c.generate('quiet', { quiet_prompt: prompt }, true); } catch (e) { console.warn('[小剧场] 按预设拼提示词失败，改用酒馆静默生成', e); }
+    finally { c.eventSource.removeListener?.(ev.CHAT_COMPLETION_PROMPT_READY, cap); }
+    if (chat?.length) {
+      const sent = chat.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }));
+      const r = await streamSt(JSON.parse(JSON.stringify(chat)), { maxTokens: responseLength, onChunk, signal });
+      return { ...r, streamed: true, sent };
+    }
+  }
   let text;
   try { text = await c.generateQuietPrompt({ quietPrompt: prompt, responseLength, removeReasoning: true }); }
   finally {

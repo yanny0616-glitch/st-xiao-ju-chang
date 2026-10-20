@@ -18,10 +18,13 @@ async function boot(page) {
   await page.goto(ST, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.SillyTavern && document.getElementById('xjc_wand'), null, { timeout: 60000 });
   // 新装的酒馆第一次打开会弹欢迎窗，挡住发送按钮；有就关掉
-  await sleep(800);
-  for (const sel of ['dialog.popup[open] .popup-button-ok', 'dialog.popup[open] .popup-button-close']) {
-    const b = page.locator(sel).first();
-    if (await b.isVisible().catch(() => false)) { await b.click().catch(() => {}); break; }
+  // 弹窗出来得有早有晚，多看几次
+  for (let i = 0; i < 8; i++) {
+    await sleep(500);
+    for (const sel of ['dialog.popup[open] .popup-button-ok', 'dialog.popup[open] .popup-button-close']) {
+      const b = page.locator(sel).first();
+      if (await b.isVisible().catch(() => false)) await b.click().catch(() => {});
+    }
   }
 }
 
@@ -125,7 +128,29 @@ async function desktop(browser) {
   const t1 = await frameText(page, '.xjc-result iframe');
   ok(t1.includes('便利店') && !t1.includes('<theater>'), '文字小剧场渲染并剥掉包裹标签');
   ok((await page.textContent('.xjc-result h3')).includes('雨夜便利店'), '标题行被解析');
+  // 写好了提醒：面板关着时弹一条可点的提示；页面在后台时等回到页面再补
+  const newest = () => page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0]?.id);
+  const waitNew = async old => { for (let i = 0; i < 150 && (await newest()) === old; i++) await sleep(200); };
+  let old = await newest();
+  await page.click('.xjc-actions .pri');
+  await page.evaluate(() => window.XiaoJuChang.close());
+  await waitNew(old);
+  const doneToast = page.locator('#toast-container .toast:has(.toast-title:text-is("小剧场写好了"))').last();
+  await doneToast.waitFor({ timeout: 10000 });
+  await doneToast.click();
+  ok(await page.locator('.xjc-root:not([hidden]) .xjc-result .xjc-ops').count() === 1, '面板关着时写好了会弹提示，点一下回到舞台看这篇');
+  await page.evaluate(() => { window.toastr?.clear(); Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); });
+  old = await newest();
+  await page.click('.xjc-actions .pri');
+  await waitNew(old);
+  await sleep(300);
+  const whileHidden = await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').count();
+  await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
+  await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').first().waitFor({ timeout: 5000 }).catch(() => {});
+  ok(whileHidden === 0 && await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').count() === 1, '页面在后台时写好了（没开系统通知权限），回到页面补一条提示');
+  await page.evaluate(() => window.toastr?.clear());
   const call1 = lastCall();
+  ok(call1.stream === true, '跟随酒馆当前 API 也发流式请求（酒馆里流式关着也一样），长篇不会被中转站超时掐断');
   const sys = call1.messages[0].content;
   ok(/<CharacterSheet>[\s\S]*林晚[\s\S]*多余的伞/.test(sys), '材料带角色卡');
   ok(sys.includes('两百天在下雨'), '材料带常驻世界书');
@@ -633,6 +658,7 @@ async function desktop(browser) {
   const q = mockCalls().slice(before7f).find(c => JSON.stringify(c.messages).includes('<Brief>'));
   const qs = q ? JSON.stringify(q.messages) : '';
   ok(q && !qs.includes('<CharacterSheet>') && qs.includes('林晚是'), '走酒馆预设：材料由酒馆拼（有角色卡、没有插件自己的 <CharacterSheet>）');
+  ok(q && q.stream === true, '走酒馆预设也是流式请求');
   const qreq = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0].request);
   ok(qreq && qreq[0].via === 'preset' && !qreq[0].partial && JSON.stringify(qreq[0].messages).includes('林晚是') && JSON.stringify(qreq[0].messages).includes('<Brief>'), '走酒馆预设：记下的是酒馆拼好、实际发出去的消息');
   // 在更早的楼层下出：酒馆预设会带上之后的聊天，自动改用插件自己拼

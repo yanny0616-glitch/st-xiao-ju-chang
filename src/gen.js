@@ -304,7 +304,8 @@ async function generateOnce(comboIn, opts = {}) {
       const prompt = `${preamble}\n\n${tasks}`;
       const rec = { kind, via: 'preset', messages: [{ role: 'system', content: prompt }], partial: true };
       sent.push(rec);
-      const r = await callQuiet(prompt);
+      const onQ = wantStream ? text => { if (!cancelled()) opts.onStream({ kind, text: previewText(text) }); } : undefined;
+      const r = await callQuiet(prompt, { onChunk: onQ, signal });
       if (r.sent?.length) Object.assign(rec, { messages: r.sent, partial: false });
       return r;
     }

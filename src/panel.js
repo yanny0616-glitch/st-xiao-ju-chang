@@ -19,6 +19,7 @@ import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks,
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { newPart, partPool, itemLabel, itemAlive, usesPrompt, comboPromptIds } from './parts.js';
 import { attachToLatest } from './chat.js';
+import { askNotifyPermission, notifyDone } from './notify.js';
 
 let root = null, panelEl = null, bodyEl = null, kickerEl = null;
 let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', favFilter = 'all', promptFilter = '', favScope = 'char', favQuery = '';
@@ -545,6 +546,7 @@ function streamSegments(text) {
 
 export async function run(combo, extra = '', more = {}) {
   if (busy) { toast('上一篇还在写'); return; }
+  askNotifyPermission();
   if (!currentChar()) { toast(ctx().groupId ? '小剧场不支持群聊' : '先打开一个角色聊天'); return; }
   if (!isOpen()) open('stage');
   else if (tab !== 'stage') switchTab('stage');
@@ -564,7 +566,7 @@ export async function run(combo, extra = '', more = {}) {
     busy = null;
     clearInterval(timer);
     updateBusyButtons();
-    setStatus(target === 'st' ? '已取消等待（跟随酒馆 API 时那次请求会继续跑完，回来的结果直接丢掉）' : '已取消', { spin: false });
+    setStatus('已取消', { spin: false });
   };
   const tick = () => setStatus(`${phase}… ${Math.round((Date.now() - t0) / 1000)} 秒${words ? ` · ${words} 字` : ''}`, { onCancel: cancel });
   const timer = setInterval(() => { if (busy?.token === token) tick(); }, 1000);
@@ -599,6 +601,8 @@ export async function run(combo, extra = '', more = {}) {
     renderKicker();
     showResult(result);
     renderRecent();
+    // 不在页面上、或者面板关着 / 不在舞台：提醒一下
+    notifyDone(result.title, { seen: isOpen() && tab === 'stage', open: () => { open('stage'); showResult(result); } });
   } catch (e) {
     clearTimeout(pendingPaint);
     if (busy?.token !== token) return;
@@ -1090,7 +1094,7 @@ function editCombo(row, draft = null) {
       ctxBox.hidden = st && (d.channel || globalChannel()) === 'preset';
     };
     const channelF = field('通道', seg([{ v: '', l: follow(CHANNEL_LABEL[globalChannel()]) }, { v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], d.channel || '', v => { d.channel = v; syncChannel(); }),
-      '自己拼：只带下面的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），不能边写边显示；在更早的楼层下出时会自动改用自己拼（酒馆预设没法截掉之后的聊天）。');
+      '自己拼：只带下面的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），聊天补全也能边写边显示；在更早的楼层下出时会自动改用自己拼（酒馆预设没法截掉之后的聊天）。');
     body.append(channelF, channelNote, ctxBox);
     // 材料：默认跟随全局，选「自定」才展开具体选项
     const custom = el('div');
@@ -1438,11 +1442,12 @@ const S = () => state.settings;
 function setGen(box) {
   const tgt = select(apiTargets(), resolveTarget(''));
   tgt.onchange = () => setSetting({ api: tgt.value });
-  box.appendChild(field('默认出口', tgt, '「跟随酒馆当前 API」不能边写边显示，也不能真正中断；连接配置和自配 API 可以。每个小剧场还能单独指定出口。'));
+  box.appendChild(field('默认出口', tgt, '都是流式请求，写得久也不会被中转站超时掐断（酒馆用文本补全时除外）。每个小剧场还能单独指定出口。'));
   const mt = input(S().maxTokens, '', 'number');
   mt.onchange = () => setSetting({ maxTokens: Math.max(256, Number(mt.value) || 4096) });
   box.appendChild(field('最大输出长度（token）', mt, '用于跟随酒馆和连接配置。HTML 小剧场很吃长度，建议 4000 以上。自配 API 在各自配置里设。'));
   box.appendChild(toggle('边写边显示', S().streamPreview !== false, v => setSetting({ streamPreview: v })));
+  box.appendChild(toggle('写好了提醒（不在页面上时发系统通知，面板关着时弹提示）', S().notifyDone !== false, v => { setSetting({ notifyDone: v }); if (v) askNotifyPermission(); }));
   box.appendChild(toggle('「随机」里也可能抽到 AI 自选', S().randomIncludesAi, v => setSetting({ randomIncludesAi: v })));
 
   // 全局值：小剧场里选「跟随全局」（新建的默认就是）时用这些；小剧场里选了自定的不受影响

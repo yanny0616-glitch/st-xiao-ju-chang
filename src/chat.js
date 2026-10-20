@@ -8,6 +8,7 @@ import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
 import { instr } from './instr.js';
 import { currentFold } from './fold.js';
+import { notifyDone } from './notify.js';
 import { isFavorite, toggleFavorite, ownTheaters, pruneForeign } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
@@ -77,6 +78,7 @@ export async function generateFor(mesId, { combo, extra, follow } = {}) {
     state.settings.played = (Number(state.settings.played) || 0) + 1;
     save('settings');
     await pushTheater(msg, result);
+    notifyDone(result.title, { open: () => mesEl(ctx().chat.indexOf(msg))?.scrollIntoView({ block: 'center' }), seen: !document.hidden });
   } catch (e) {
     if (!ctrl.signal.aborted) fail(new Error(`小剧场没写出来：${e.message || e}`));
   } finally {
