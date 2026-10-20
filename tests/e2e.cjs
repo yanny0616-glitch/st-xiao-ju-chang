@@ -269,12 +269,17 @@ async function desktop(browser) {
   const mainChat = calls.filter(c => !c.messages.some(m => typeof m.content === 'string' && m.content.includes('<Brief>')));
   ok(mainChat.every(c => !JSON.stringify(c.messages).includes('牌面朝下') && !JSON.stringify(c.messages).includes('<Brief>')), '聊天里的小剧场不会发给模型');
 
-  // 9. 刷新后还在
+  // 9. 刷新后还在；手动收起的那篇刷新后还是收起的
+  await page.locator('#chat .mes .xjc-tail-card').first().locator('.xjc-tail-hd .ttl').click();
+  ok(await page.locator('#chat .mes .xjc-tail-card').first().locator('.xjc-tail-bd').isHidden(), '点标题栏收起');
+  await sleep(1500);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.SillyTavern && document.getElementById('xjc_wand'), null, { timeout: 60000 });
   await openChar(page);
   await page.waitForFunction(() => document.querySelectorAll('#chat .mes .xjc-tail-card').length >= 3, null, { timeout: 15000 }).catch(() => {});
   ok(await page.locator('#chat .mes .xjc-tail-card').count() >= 3, '刷新后聊天里的小剧场还在');
+  const states = await page.evaluate(() => [...document.querySelectorAll('#chat .mes .xjc-tail-card')].map(n => n.querySelector('.xjc-tail-bd').hidden));
+  ok(states[0] === true && states.slice(1).every(h => h === false), `刷新后收起的保持收起，其余照默认展开（${states}）`);
   await page.click('#extensionsMenuButton').catch(() => {});
   await page.click('#xjc_wand');
   await page.click('.xjc-tabs button[data-v="fav"]');

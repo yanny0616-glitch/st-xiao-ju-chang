@@ -9,8 +9,6 @@ import { currentChar } from './host.js';
 import { isFavorite, toggleFavorite } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
-const collapsed = new Set(); // 收起的小剧场 id（只在这次打开里记）
-const opened = new Set(); // 默认收起时手动展开的
 
 // ── 存 ──
 function slim(result) {
@@ -105,7 +103,8 @@ function tailCard(mesId, theater) {
   ttl.appendChild(el('small', '', `${KIND_LABEL[kindOf(theater)]} · ${theater.snapshot?.comboName || ''}`));
   hd.appendChild(ttl);
   const body = el('div', 'xjc-tail-bd');
-  const isOpen = () => (state.settings.tail.expanded ? !collapsed.has(theater.id) : opened.has(theater.id));
+  // 手动收起/展开过的记在这篇自己身上（theater.open），存进聊天文件，刷新后保持；没动过的跟「默认展开」走
+  const isOpen = () => (typeof theater.open === 'boolean' ? theater.open : !!state.settings.tail.expanded);
   const mount = () => {
     if (body.firstChild) return;
     mountFrame(body, theater.segments || [], { onAction: text => generateFor(currentIndex(), { combo: theater.comboCopy, extra: continueExtra(theater, text) }) });
@@ -142,12 +141,15 @@ function tailCard(mesId, theater) {
   });
   hd.addEventListener('click', () => {
     const now = !isOpen();
-    if (state.settings.tail.expanded) { if (now) collapsed.delete(theater.id); else collapsed.add(theater.id); }
-    else if (now) opened.add(theater.id); else opened.delete(theater.id);
+    theater.open = now;
     body.hidden = !now;
+    card.classList.toggle('closed', !now);
     if (now) mount();
+    const c = ctx();
+    (c.saveChatDebounced || c.saveChat)?.call(c);
   });
   body.hidden = !isOpen();
+  card.classList.toggle('closed', body.hidden);
   card.append(hd, body);
   if (!body.hidden) requestAnimationFrame(mount);
   return card;
