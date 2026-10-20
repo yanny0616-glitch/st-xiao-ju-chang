@@ -1,5 +1,6 @@
 // 渲染：AI 写的 HTML/JS 整块放进沙盒 iframe（没有 allow-same-origin，拿不到酒馆的页面、存储和密钥）；
 // 纯文字也进同一种 iframe，配色和字体跟小剧场主题（或选定的画布）
+import { applyFold } from './fold.js';
 import { esc } from './util.js';
 import { state } from './store.js';
 import { byId } from './util.js';
@@ -224,5 +225,6 @@ export function applyTheme() {
   syncCustomStyle();
   document.querySelectorAll('[data-xjc-theme]').forEach(markTheme);
   document.body.classList.toggle('xjc-motion-off', state.settings.motion === false);
+  applyFold();
   updateReading();
 }

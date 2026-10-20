@@ -8,6 +8,7 @@ import {
   resultPlainText, contextLabel, postProcess,
 } from './gen.js';
 import { INSTR, instrDefault, instrEdited } from './instr.js';
+import { FOLDS, foldCss, currentFold, customFoldCss, applyFold } from './fold.js';
 import { resolveCombo, globalContext, globalWho, globalChannel, globalStyle, globalStaged, globalWriteBack, WHO_LABEL, CHANNEL_LABEL, STYLE_LABEL } from './follow.js';
 import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
@@ -1472,6 +1473,61 @@ function setLook(box) {
   box.appendChild(field('正文字号', seg([{ v: 0.9, l: '小' }, { v: 1, l: '标准' }, { v: 1.1, l: '大' }, { v: 1.2, l: '特大' }].map(x => ({ v: String(x.v), l: x.l })), String(S().fontScale), v => { setSetting({ fontScale: Number(v) }); reread(); }), '在界面字号的基础上，单独调小剧场正文。'));
   box.appendChild(field('行距', seg([{ v: 'tight', l: '紧' }, { v: 'mid', l: '适中' }, { v: 'loose', l: '松' }], S().lineHeight, v => { setSetting({ lineHeight: v }); reread(); })));
   box.appendChild(field('正文底色', seg(Object.entries(CANVAS_LABEL).map(([v, l]) => ({ v, l })), S().canvas, v => { setSetting({ canvas: v }); reread(); }), '正文的底色和文字色，默认跟着主题走。AI 写的 HTML 用 --xjc-bg 等变量就能配色一致。'));
+  foldSection(box);
+}
+
+/** 楼层里小剧场收起时的样子：每种带一个预览，点一下就换；「自定」可以写 CSS，边改边看 */
+function foldSection(box) {
+  box.appendChild(el('div', 'xjc-sec', '楼层里的折叠样式'));
+  box.appendChild(el('p', 'xjc-hint', `挂在聊天消息下面的小剧场收起时的样子，颜色跟着主题走。${S().tail.enabled ? '' : '（楼层功能现在没开，在「设置 → 聊天内」打开。）'}新挂上的默认收起，想默认展开在「聊天内」里改。`));
+  const sample = v => {
+    const tail = el('div', 'xjc-tail');
+    tail.dataset.fold = v;
+    for (const [t, k] of [['雨夜便利店', '文字型 · 深夜便利店'], ['论坛目击帖', '前端型 · 论坛']]) {
+      const card = el('div', 'xjc-tail-card closed');
+      markTheme(card);
+      const hd = el('div', 'xjc-tail-hd');
+      const ttl = el('div', 'ttl');
+      ttl.innerHTML = '<b><i class="fa-solid fa-masks-theater"></i> 小剧场</b>';
+      ttl.append(document.createTextNode(t), el('small', '', k));
+      hd.appendChild(ttl);
+      for (const ic of ['fa-expand', 'fa-rotate-right', 'fa-heart', 'fa-trash-can']) { const b = el('span', 'xjc-tb'); b.innerHTML = `<i class="fa-solid ${ic}"></i>`; hd.appendChild(b); }
+      card.appendChild(hd);
+      tail.appendChild(card);
+    }
+    return tail;
+  };
+  const list = el('div', 'xjc-folds');
+  const editor = el('div', 'xjc-fold-edit');
+  const paint = () => {
+    list.querySelectorAll('.xjc-fold-opt').forEach(o => o.classList.toggle('on', o.dataset.v === currentFold()));
+    editor.hidden = currentFold() !== 'custom';
+  };
+  for (const f of FOLDS) {
+    const opt = el('div', 'xjc-fold-opt');
+    opt.dataset.v = f.v;
+    const hd = el('div', 'xjc-fold-hd');
+    hd.append(el('b', '', f.l), el('span', '', f.d));
+    opt.append(hd, sample(f.v));
+    opt.onclick = () => { setSetting({ foldStyle: f.v }); applyFold(); paint(); };
+    list.appendChild(opt);
+  }
+  box.appendChild(list);
+  // 自定：从某个内置样式开始改；输入时预览和聊天里的立刻跟着变，点保存才存
+  const ta = textarea(customFoldCss(), 9);
+  ta.classList.add('xjc-code');
+  ta.spellcheck = false;
+  ta.addEventListener('input', () => applyFold(ta.value));
+  editor.append(
+    field('从这个样式开始改', seg(FOLDS.filter(f => f.v !== 'custom').map(f => ({ v: f.v, l: f.l })), '', v => { ta.value = foldCss(v, 'custom') || '/* 标题栏就是不加任何规则的样子，在这里写自己的 */\n.xjc-tail[data-fold="custom"] .xjc-tail-card.closed {\n}'; applyFold(ta.value); })),
+    field('自定 CSS', ta, '收起的卡片是 .xjc-tail[data-fold="custom"] .xjc-tail-card.closed；里面 .xjc-tail-hd 是标题栏，.ttl 是标题，.ttl small 是类型，.xjc-tb 是右边的按钮。颜色用 var(--xjc-ui-acc) 这类主题变量，换主题会跟着变。'),
+  );
+  const row = el('div', 'xjc-row');
+  row.append(btn('保存自定样式', async () => { await setSetting({ foldCss: ta.value }); applyFold(); toast('折叠样式已保存'); }, 'xjc-btn pri sm'),
+    btn('撤销没保存的', () => { ta.value = customFoldCss(); applyFold(); }, 'xjc-btn ghost sm'));
+  editor.appendChild(row);
+  box.appendChild(editor);
+  paint();
 }
 
 function setData(box) {

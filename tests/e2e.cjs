@@ -47,7 +47,7 @@ async function setupData(page) {
     }
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
     for (const k of [...s.LIBRARY, ...s.HEAVY]) s.state[k] = [];
-    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, enabled: false, auto: false, button: true, askExtra: false } };
+    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, enabled: false, auto: false, button: true, askExtra: false, expanded: true }, foldStyle: 'pill', foldCss: '' };
     s.seedDefaults(false);
     await s.saveAll();
     c.saveSettingsDebounced();
@@ -305,7 +305,7 @@ async function desktop(browser) {
     return { fav: await get('favorites'), apis: await get('apis'), bagApis: 'apis' in (SillyTavern.getContext().extensionSettings.xiaoJuChang || {}) };
   });
   ok(Array.isArray(files5.fav) && files5.fav.length === 1, '收藏存成酒馆服务器上的用户文件（换设备、换浏览器都在）');
-  ok(Array.isArray(files5.apis) && files5.apis.some(a => a.key === 'sk-test-123') && !files5.bagApis, 'API 配置（含密钥）存在单独的文件里，不在 settings.json');
+  ok(Array.isArray(files5.apis) && files5.apis.some(a => a.key === 'sk-test-123') && !files5.bagApis, `API 配置（含密钥）存在单独的文件里，不在 settings.json（文件 ${files5.apis && files5.apis.length} 条，settings 里有：${files5.bagApis}）`);
   // 最近 / 收藏按角色：默认只看当前角色；收藏多了能搜
   const scopeT = await page.evaluate(async () => {
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
@@ -610,6 +610,30 @@ async function desktop(browser) {
   ok(mig.inState && mig.inFile && !mig.bag, `以前存在 settings.json 里的 API 配置自动搬进单独的文件（${JSON.stringify(mig)}）`);
   await page.click('.xjc-view[data-view="fav"] .xjc-seg >> text=本聊天');
   ok(await page.locator('.xjc-view[data-view="fav"] .xjc-item').count() >= 3, '「本聊天」列出挂在消息下的小剧场');
+
+  // 9b. 楼层里的折叠样式：默认胶囊（只包住标题），外观里换样式聊天里立刻变；自定 CSS 边改边看
+  const fold0 = await page.evaluate(async () => {
+    const d = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/defaults.js');
+    const card = document.querySelector('#chat .xjc-tail-card.closed');
+    const mes = card.closest('.mes_block') || card.parentElement;
+    return { def: d.DEFAULT_SETTINGS.tail.expanded === false && d.DEFAULT_SETTINGS.foldStyle === 'pill', fold: card.parentElement.dataset.fold, w: card.getBoundingClientRect().width, full: card.parentElement.getBoundingClientRect().width, h: card.getBoundingClientRect().height };
+  });
+  ok(fold0.def && fold0.fold === 'pill' && fold0.w < fold0.full * 0.8 && fold0.h < 36, `默认收起、胶囊样式，只包住标题（${Math.round(fold0.w)}/${Math.round(fold0.full)} 宽，${Math.round(fold0.h)} 高）`);
+  await page.click('.xjc-tabs button[data-v="settings"]');
+  await page.click('.xjc-view[data-view=settings] .xjc-seg button:has-text("外观")');
+  await page.click('.xjc-fold-opt[data-v="line"]');
+  const foldLine = await page.evaluate(() => { const c = document.querySelector('#chat .xjc-tail-card.closed'); return { fold: c.parentElement.dataset.fold, border: getComputedStyle(c).borderTopWidth }; });
+  ok(foldLine.fold === 'line' && foldLine.border === '0px', '换成「一行小字」，聊天里收起的小剧场立刻跟着变');
+  await page.click('.xjc-fold-opt[data-v="custom"]');
+  await page.fill('.xjc-fold-edit textarea', '.xjc-tail[data-fold="custom"] .xjc-tail-card.closed { outline: 3px solid rgb(1, 2, 3); }');
+  const foldPv = await page.evaluate(() => getComputedStyle(document.querySelector('.xjc-fold-opt[data-v="custom"] .xjc-tail-card')).outlineColor);
+  ok(foldPv === 'rgb(1, 2, 3)', '自定折叠样式：边改边预览');
+  await page.click('.xjc-fold-edit .xjc-btn:has-text("保存自定样式")');
+  const foldSaved = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.settings.foldCss.includes('rgb(1, 2, 3)') && getComputedStyle(document.querySelector('#chat .xjc-tail-card.closed')).outlineColor === 'rgb(1, 2, 3)');
+  ok(foldSaved, '自定折叠样式保存后聊天里生效');
+  await page.click('.xjc-fold-opt[data-v="pill"]');
+  await page.screenshot({ path: `${SHOTS}/d-08-fold.png` });
+  await page.click('.xjc-x');
 
   // 10. 导入 Float 小剧场整包
   const imported = await page.evaluate(async () => {

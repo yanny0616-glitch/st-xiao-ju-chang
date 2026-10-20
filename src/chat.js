@@ -7,6 +7,7 @@ import { mountFrame, markTheme } from './frame.js';
 import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
 import { instr } from './instr.js';
+import { currentFold } from './fold.js';
 import { isFavorite, toggleFavorite, ownTheaters, pruneForeign } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
@@ -173,6 +174,7 @@ export function renderTail(mesId) {
     const text = node.querySelector('.mes_text');
     if (text) text.after(box); else node.querySelector('.mes_block')?.appendChild(box);
   }
+  box.dataset.fold = currentFold();
   // 已经挂着的 iframe 不重挂，保留交互状态
   const want = new Set(list.map(t => t.id));
   for (const card of [...box.querySelectorAll('.xjc-tail-card')]) if (!want.has(card.dataset.id)) card.remove();

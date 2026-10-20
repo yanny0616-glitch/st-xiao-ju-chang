@@ -78,7 +78,11 @@ const legacyGet = key => (HEAVY.includes(key) ? idbGet(key).catch(() => undefine
 async function serverRead(key) {
   try {
     const v = await fileGet(key);
-    if (v !== undefined) return v;
+    if (v !== undefined) {
+      // 已经在文件里了：settings.json 里要是还残留老的一份（上次搬完没来得及存），清掉
+      if (key in stBag()) { delete stBag()[key]; ctx().saveSettingsDebounced(); }
+      return v;
+    }
   } catch (e) {
     console.warn('[小剧场]', e);
     serverDown.add(key);
