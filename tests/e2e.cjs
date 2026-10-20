@@ -225,6 +225,57 @@ async function desktop(browser) {
   const after3c = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.id === s.settings.currentComboId); return { n: s.combos.length, ids: c?.promptIds?.length }; });
   ok(after3c.n === nCombos + 1 && after3c.ids === 2 && !(await page.textContent('.xjc-combo-card .nm')).includes('临时'), '「存成小剧场」存进库并放到舞台');
 
+  // 3e. 分组：提示词放进分组，库里按组显示、可折叠；选提示词能整组加入；随机能只从某个组里抽
+  await page.evaluate(async () => {
+    const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
+    for (const [i, t] of ['三张牌阵', '凯尔特十字', '单张抽牌'].entries()) s.state.prompts.push({ id: `p_tarot${i}`, title: t, tags: ['塔罗'], group: '塔罗形式', content: `【塔罗形式${i}】用${t}的形式写。` });
+    await s.save('prompts');
+  });
+  await page.click('.xjc-tabs button[data-v="library"]');
+  await page.click('.xjc-view[data-view="library"] .xjc-seg button:has-text("提示词")');
+  const grpHd = page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("塔罗形式"))');
+  ok(await grpHd.count() === 1 && (await grpHd.locator('.n').textContent()) === '3', '库里按分组显示，组名后面是条数');
+  await grpHd.click();
+  ok(await page.locator('.xjc-view[data-view="library"] .xjc-grp:has(.xjc-grp-hd b:text-is("塔罗形式")) > .xjc-list').isHidden(), '点组标题能折叠');
+  await grpHd.click();
+  await page.click('.xjc-view[data-view="library"] .xjc-btn:has-text("按第一个标签分组")');
+  await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("分组")').click();
+  const autoG = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.filter(p => !p.group).length);
+  ok(autoG === 0, '「按第一个标签分组」把没分组的都按标签分好');
+  await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("场景")) .xjc-btn:has-text("改名")').click();
+  await page.fill('.xjc-sheet input[placeholder="新名字"]', '场景库');
+  await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("改名")').click();
+  ok(await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd b:text-is("场景库")').count() === 1, '分组能改名');
+  await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("场景库")) .xjc-btn:has-text("解散")').click();
+  await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("解散")').click();
+  ok(await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd b:text-is("场景库")').count() === 0 && await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd b:text-is("未分组")').count() === 1, '解散分组：条目回到「未分组」');
+  // 编辑小剧场：选提示词整组加入
+  await page.click('.xjc-view[data-view="library"] .xjc-seg button:has-text("小剧场")');
+  await page.click('text=＋ 新建小剧场');
+  await page.click('.xjc-sheet .xjc-btn:has-text("＋ 选提示词")');
+  await page.locator('.xjc-sheet').last().locator('.xjc-grp-hd:has(b:text-is("塔罗形式")) .xjc-btn:has-text("整组加入")').click();
+  await page.locator('.xjc-sheet').last().locator('.xjc-sheet-ft .xjc-btn:has-text("确定")').click();
+  ok(await page.locator('.xjc-sheet .xjc-ordered .xjc-item').count() === 3, '选提示词：整组加入');
+  await page.locator('.xjc-sheet .xjc-x').last().click();
+  const tarot = await page.evaluate(async () => {
+    const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
+    const s = await import(base + 'store.js');
+    const g = await import(base + 'gen.js');
+    const combo = { ...s.state.combos.find(x => x.id === 'c_store'), promptIds: [], random: { count: 1, include: [], exclude: [], groups: ['prompts/塔罗形式'] }, output: { mode: 'text' } };
+    const seen = new Set();
+    for (let i = 0; i < 3; i++) {
+      const r = await g.generateTheater(combo, {});
+      const sys = r.request[0].messages.map(m => m.content).join('\n');
+      const hits = [0, 1, 2].filter(k => sys.includes(`【塔罗形式${k}】`));
+      if (hits.length !== 1) return { bad: hits.length };
+      seen.add(hits[0]);
+    }
+    s.state.prompts = s.state.prompts.filter(p => !p.id.startsWith('p_tarot'));
+    await s.save('prompts');
+    return { bad: 0, seen: seen.size };
+  });
+  ok(tarot.bad === 0, `随机「从分组抽」：每次只从提示词库的「塔罗形式」组里抽一种（3 次抽到 ${tarot.seen} 种）`);
+
   // 3d. 内置指令可以改：改了「纯文字」的输出要求，发给模型的就是改过的；恢复默认后回到原样
   await page.click('.xjc-tabs button[data-v="settings"]');
   await page.click('.xjc-view[data-view="settings"] .xjc-seg >> text=生成');

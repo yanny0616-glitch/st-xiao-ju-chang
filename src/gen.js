@@ -19,6 +19,8 @@ export function captureCombo(combo) {
       preamble: byId(state.preambles, combo.preambleId) || state.preambles[0] || null,
       prompts: (combo.promptIds || []).map(id => byId(state.prompts, id)).filter(Boolean),
       randoms: state.randoms, macros: state.macros,
+      // 随机从提示词分组里抽时，那几个组的提示词也存一份，重放时照当时的抽
+      groupPrompts: state.prompts.filter(p => (combo.random?.groups || []).includes(`prompts/${p.group || ''}`)),
       length: resolveLength(combo),
     });
   }
@@ -54,13 +56,25 @@ function drawRandoms(combo) {
   const n = Math.max(0, Number(rule.count) || 0);
   if (!n) return [];
   const inc = new Set(rule.include || []), exc = new Set(rule.exclude || []);
-  const randoms = combo._dependencies ? combo._dependencies.randoms : state.randoms;
-  let pool = randoms.filter(r => {
+  const deps = combo._dependencies;
+  const randoms = deps ? deps.randoms : state.randoms;
+  // 选了分组就只从这些组里抽（随机池的组、提示词库的组都行，已经固定放进小剧场的提示词不再抽）；没选 = 整个随机池
+  const groups = rule.groups || [];
+  let source = randoms;
+  if (groups.length) {
+    const prompts = deps ? (deps.groupPrompts || []) : state.prompts;
+    const fixed = new Set(combo.promptIds || []);
+    source = [
+      ...randoms.filter(r => groups.includes(`randoms/${r.group || ''}`)),
+      ...prompts.filter(p => groups.includes(`prompts/${p.group || ''}`) && !fixed.has(p.id)),
+    ];
+  }
+  let pool = source.filter(r => {
     const tags = r.tags || [];
     if (tags.some(t => exc.has(t))) return false;
     return !inc.size || tags.some(t => inc.has(t));
   });
-  if (!pool.length) pool = randoms.filter(r => !(r.tags || []).some(t => exc.has(t)));
+  if (!pool.length) pool = source.filter(r => !(r.tags || []).some(t => exc.has(t)));
   return shuffle(pool).slice(0, n);
 }
 

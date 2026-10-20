@@ -41,7 +41,8 @@ function normalizeCombo(c) {
   return {
     id: str(c.id, 80), name: str(c.name, 60) || '未命名', tags: tags(c.tags),
     preambleId: str(c.preambleId, 80), promptIds: Array.isArray(c.promptIds) ? c.promptIds.filter(x => typeof x === 'string') : [],
-    random: { count: num(c.random?.count, 0, 0, 5), include: tags(c.random?.include), exclude: tags(c.random?.exclude) },
+    // groups：从哪些分组里抽，'prompts/组名' 或 'randoms/组名'；空 = 整个随机池
+    random: { count: num(c.random?.count, 0, 0, 5), include: tags(c.random?.include), exclude: tags(c.random?.exclude), groups: (Array.isArray(c.random?.groups) ? c.random.groups : []).map(String).filter(g => /^(prompts|randoms)\/.{1,30}$/.test(g)).slice(0, 30) },
     output: {
       mode: ['text', 'html', 'mixed'].includes(o.mode) ? o.mode : 'text', wrapTag: /^[a-zA-Z][\w-]{0,30}$/.test(o.wrapTag || '') ? o.wrapTag : '',
       length: ['default', 'short', 'medium', 'long', 'custom'].includes(o.length) ? o.length : 'default', customChars: num(o.customChars, 900, 50, 20000),
@@ -56,8 +57,8 @@ function normalizeCombo(c) {
 }
 const normalizers = {
   preambles: r => ({ id: str(r.id, 80), name: str(r.name, 60) || '未命名', content: str(r.content) }),
-  prompts: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), content: str(r.content) }),
-  randoms: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), content: str(r.content) }),
+  prompts: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content) }),
+  randoms: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content) }),
   macros: r => ({
     id: str(r.id, 80), name: str(r.name, 30) || '未命名', kind: r.kind === 'number' ? 'number' : 'words',
     values: Array.isArray(r.values) ? r.values.filter(v => typeof v === 'string').slice(0, 500) : [], min: num(r.min, 1, -1e6, 1e6), max: num(r.max, 10, -1e6, 1e6),
@@ -142,12 +143,12 @@ export function classifyJson(data) {
 }
 
 /** 加进某个库，返回新建的条目 */
-export async function addRows(kind, rows) {
+export async function addRows(kind, rows, extra = {}) {
   const made = [];
   for (const r of rows) {
     const row = kind === 'preambles'
       ? { id: uid('pre'), name: String(r.title || r.name).slice(0, 60), content: r.content, createdAt: new Date().toISOString() }
-      : { id: uid(kind.slice(0, 3)), title: String(r.title || r.name).slice(0, 60), tags: r.tags || [], content: r.content, createdAt: new Date().toISOString() };
+      : { id: uid(kind.slice(0, 3)), title: String(r.title || r.name).slice(0, 60), tags: r.tags || [], group: String(extra.group || r.group || '').trim().slice(0, 30), content: r.content, createdAt: new Date().toISOString() };
     state[kind].push(row);
     made.push(row);
   }

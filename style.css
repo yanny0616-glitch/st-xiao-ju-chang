@@ -785,3 +785,10 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
 .xjc-fold-opt.on .xjc-fold-hd b { color: var(--xjc-ui-acc); }
 .xjc-fold-opt .xjc-tail { pointer-events: none; }
 .xjc-fold-edit { margin-top: 10px; }
+/* 库里的分组 */
+.xjc-grp + .xjc-grp { margin-top: 10px; }
+.xjc-grp-hd { display: flex; align-items: center; gap: 8px; padding: 6px 2px; cursor: pointer; user-select: none; border-bottom: 1px solid var(--xjc-ui-line); }
+.xjc-grp-hd .arw { width: 1em; opacity: .6; }
+.xjc-grp-hd b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xjc-grp-hd .n { font-size: .8em; opacity: .55; }
+.xjc-grp > .xjc-list { margin-top: 6px; }

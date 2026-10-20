@@ -280,17 +280,22 @@ function pickCombo() {
     const draw = () => {
       list.innerHTML = '';
       if (mode === 'prompts') {
-        const shownP = state.prompts.filter(p => (!tag || (p.tags || []).includes(tag)) && (!q || (p.title + ' ' + (p.tags || []).join(' ')).toLowerCase().includes(q)));
+        const shownP = state.prompts.filter(p => (!tag || (p.tags || []).includes(tag)) && (!q || (p.title + ' ' + (p.group || '') + ' ' + (p.tags || []).join(' ')).toLowerCase().includes(q)));
         if (!shownP.length) list.appendChild(el('div', 'xjc-empty', state.prompts.length ? '没有匹配的提示词' : '提示词库是空的'));
         const order = [...picked];
-        for (const p of shownP) {
+        const rowOf = p => {
           const it = itemRow(p.title, `${(p.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${String(p.content || '').replace(/\s+/g, ' ').slice(0, 40)}`, () => {
             if (picked.has(p.id)) picked.delete(p.id); else picked.add(p.id);
             draw();
           }, picked.has(p.id) ? `第 ${order.indexOf(p.id) + 1} 条` : '');
           if (picked.has(p.id)) it.classList.add('on');
-          list.appendChild(it);
-        }
+          return it;
+        };
+        const whole = (g, inG) => {
+          const all = inG.every(p => picked.has(p.id));
+          return btn(all ? '整组去掉' : '整组选上', e => { e.stopPropagation(); for (const p of inG) { if (all) picked.delete(p.id); else picked.add(p.id); } draw(); }, 'xjc-btn sm');
+        };
+        if (shownP.length) groupedList(list, 'prompts', shownP, rowOf, { open: !!(q || tag), manage: false, headExtra: whole });
         paintUse();
         return;
       }
@@ -557,38 +562,141 @@ function libCombos(box) {
   box.appendChild(list);
 }
 function allTags(list) { return [...new Set(list.flatMap(x => x.tags || []))]; }
-function libPrompts(box) {
+/**
+ * 分组：提示词和随机池的条目各有一个 group（像文件夹，一条只在一个组里），列表按组显示、可折叠；
+ * 标签照旧用来筛选和「只抽 / 排除」。折叠状态记在 settings.groupFold
+ */
+const UNGROUPED = '未分组';
+function groupsOf(kind) {
+  const seen = [];
+  for (const r of state[kind]) { const g = (r.group || '').trim(); if (g && !seen.includes(g)) seen.push(g); }
+  return seen;
+}
+function groupInput(kind, value) {
+  const i = input(value || '', '比如：塔罗、日常场景（空 = 未分组）');
+  const id = `xjc-groups-${kind}`;
+  let dl = document.getElementById(id);
+  if (!dl) { dl = document.createElement('datalist'); dl.id = id; document.body.appendChild(dl); }
+  dl.innerHTML = '';
+  for (const g of groupsOf(kind)) { const o = document.createElement('option'); o.value = g; dl.appendChild(o); }
+  i.setAttribute('list', id);
+  return i;
+}
+/** 把 rows 按组画进 box；open 为 true 时（在搜索 / 筛标签）全部展开、空组不显示 */
+function groupedList(box, kind, rows, buildRow, { open = false, manage = true, onChange = () => {}, headExtra = null } = {}) {
+  const groups = groupsOf(kind);
+  if (!groups.length) {
+    const list = el('div', 'xjc-list');
+    for (const r of rows) list.appendChild(buildRow(r));
+    box.appendChild(list);
+    return;
+  }
+  const fold = S().groupFold || {};
+  for (const g of [...groups, UNGROUPED]) {
+    const inG = rows.filter(r => ((r.group || '').trim() || UNGROUPED) === g);
+    if (!inG.length && (open || g === UNGROUPED)) continue;
+    const key = `${kind}:${g}`;
+    const sec = el('div', 'xjc-grp');
+    const hd = el('div', 'xjc-grp-hd');
+    const closed = !open && !!fold[key];
+    sec.classList.toggle('closed', closed);
+    hd.append(el('span', 'arw', closed ? '▸' : '▾'), el('b', '', g), el('span', 'n', String(inG.length)));
+    if (headExtra) { const x = headExtra(g, inG); if (x) hd.appendChild(x); }
+    if (manage && g !== UNGROUPED) {
+      hd.appendChild(btn('改名', e => { e.stopPropagation(); renameGroup(kind, g, onChange); }, 'xjc-btn sm ghost'));
+      hd.appendChild(btn('解散', async e => {
+        e.stopPropagation();
+        if (!(await confirmSheet('解散分组', `「${g}」里的 ${state[kind].filter(r => r.group === g).length} 条移到「未分组」，条目本身不删。`, '解散'))) return;
+        state[kind].forEach(r => { if (r.group === g) r.group = ''; });
+        await save(kind);
+        onChange();
+      }, 'xjc-btn sm ghost'));
+    }
+    const list = el('div', 'xjc-list');
+    list.hidden = closed;
+    for (const r of inG) list.appendChild(buildRow(r));
+    hd.onclick = () => {
+      if (open) return;
+      const now = !sec.classList.contains('closed');
+      sec.classList.toggle('closed', now);
+      list.hidden = now;
+      hd.querySelector('.arw').textContent = now ? '▸' : '▾';
+      setSetting({ groupFold: { ...(S().groupFold || {}), [key]: now } });
+    };
+    sec.append(hd, list);
+    box.appendChild(sec);
+  }
+}
+function renameGroup(kind, g, onChange) {
+  openSheet(`分组「${g}」改名`, (body, foot, closeIt) => {
+    const i = input(g, '新名字');
+    body.appendChild(field('新名字', i, '和已有的分组同名就合并进去。'));
+    foot.appendChild(btn('改名', async () => {
+      const n = i.value.trim().slice(0, 30);
+      if (!n) { toast('名字不能空'); return; }
+      state[kind].forEach(r => { if (r.group === g) r.group = n; });
+      const fold = { ...(S().groupFold || {}) };
+      if (`${kind}:${g}` in fold) { fold[`${kind}:${n}`] = fold[`${kind}:${g}`]; delete fold[`${kind}:${g}`]; }
+      await Promise.all([save(kind), setSetting({ groupFold: fold })]);
+      closeIt(); onChange();
+    }, 'xjc-btn pri'));
+  });
+}
+const libQuery = { prompts: '', randoms: '' };
+const libTag = { prompts: '', randoms: '' };
+/** 提示词 / 随机池共用：搜索、标签筛选、按组显示 */
+function libEntries(box, kind) {
+  const label = kind === 'prompts' ? '提示词' : '随机条目';
   const row = el('div', 'xjc-row');
-  row.append(btn('＋ 新增提示词', () => editText('prompts', null), 'xjc-btn pri'), btn('批量导入', importFlow, 'xjc-btn'));
+  row.append(btn(`＋ 新增${label}`, () => editText(kind, null), 'xjc-btn pri'));
+  if (kind === 'prompts') row.appendChild(btn('批量导入', importFlow, 'xjc-btn'));
+  // 没分过组、但有标签的：一键按第一个标签分好
+  const canAuto = state[kind].some(r => !(r.group || '').trim() && (r.tags || []).length);
+  if (canAuto) row.appendChild(btn('按第一个标签分组', async () => {
+    const n = state[kind].filter(r => !(r.group || '').trim() && (r.tags || []).length).length;
+    if (!(await confirmSheet('按标签分组', `把 ${n} 条还没分组的${label}，按各自的第一个标签放进同名分组？已经分了组的不动。`, '分组'))) return;
+    state[kind].forEach(r => { if (!(r.group || '').trim() && (r.tags || []).length) r.group = r.tags[0]; });
+    await save(kind);
+    renderLibrary();
+  }, 'xjc-btn ghost'));
   box.appendChild(row);
-  const tags = allTags(state.prompts);
+  if (kind === 'randoms') box.appendChild(el('p', 'xjc-hint', '生成时按小剧场里的「随机」规则从这里抽；「只抽 / 排除」看的是标签。'));
+  const list = el('div');
+  const paint = () => {
+    list.innerHTML = '';
+    const q = libQuery[kind].trim().toLowerCase();
+    const rows = state[kind].filter(r => (!libTag[kind] || (r.tags || []).includes(libTag[kind])) && (!q || [r.title, r.content, r.group, ...(r.tags || [])].join(' ').toLowerCase().includes(q)));
+    if (!state[kind].length) { list.appendChild(el('div', 'xjc-empty', kind === 'prompts' ? '场景、if 线、文字形式、前端形式都放这里，用分组整理，用标签筛选。' : '随机池是空的。')); return; }
+    if (!rows.length) { list.appendChild(el('div', 'xjc-empty', '没有匹配的条目。')); return; }
+    groupedList(list, kind, rows, r => itemRow(r.title, `${(r.tags || []).map(t => '#' + t).join(' ')} ${String(r.content || '').replace(/\s+/g, ' ').slice(0, 60)}`, () => editText(kind, r)), { open: !!(q || libTag[kind]), onChange: renderLibrary });
+  };
+  if (state[kind].length > 6) {
+    const search = input(libQuery[kind], '搜标题 / 内容 / 分组 / 标签');
+    search.type = 'search';
+    search.style.marginTop = '12px';
+    search.oninput = () => { libQuery[kind] = search.value; paint(); };
+    box.appendChild(search);
+  }
+  const tags = allTags(state[kind]);
   if (tags.length) {
     const chips = el('div', 'xjc-chips');
-    chips.style.marginTop = '12px';
+    chips.style.marginTop = '10px';
     for (const t of ['', ...tags]) {
-      const c = el('button', 'xjc-chip' + (promptFilter === t ? ' on' : ''), t || '全部');
+      const c = el('button', 'xjc-chip' + (libTag[kind] === t ? ' on' : ''), t ? '#' + t : '全部');
       c.type = 'button';
-      c.onclick = () => { promptFilter = t; renderLibrary(); };
+      c.onclick = () => { libTag[kind] = t; chips.querySelectorAll('.xjc-chip').forEach(x => x.classList.toggle('on', x === c)); paint(); };
       chips.appendChild(c);
     }
     box.appendChild(chips);
   }
-  const list = el('div', 'xjc-list');
   list.style.marginTop = '12px';
-  const rows = state.prompts.filter(p => !promptFilter || (p.tags || []).includes(promptFilter));
-  if (!rows.length) list.appendChild(el('div', 'xjc-empty', '场景、if 线、文字形式、前端形式都放这里，用标签区分。'));
-  for (const p of rows) list.appendChild(itemRow(p.title, `${(p.tags || []).map(t => '#' + t).join(' ')} ${p.content.replace(/\s+/g, ' ').slice(0, 60)}`, () => editText('prompts', p)));
   box.appendChild(list);
+  paint();
 }
+function libPrompts(box) { libEntries(box, 'prompts'); }
 function libRandoms(box) {
   box.appendChild(el('div', 'xjc-sec', '随机池 · 生成时按规则抽'));
-  const l1 = el('div', 'xjc-list');
-  for (const r of state.randoms) l1.appendChild(itemRow(r.title, `${(r.tags || []).map(t => '#' + t).join(' ')} ${r.content.replace(/\s+/g, ' ').slice(0, 60)}`, () => editText('randoms', r)));
-  box.appendChild(l1);
-  const r1 = el('div', 'xjc-row');
-  r1.style.marginTop = '10px';
-  r1.appendChild(btn('＋ 新增随机条目', () => editText('randoms', null), 'xjc-btn'));
-  box.appendChild(r1);
+  libEntries(box, 'randoms');
   box.appendChild(el('div', 'xjc-sec', '随机宏 · 写在提示词里用'));
   box.appendChild(el('p', 'xjc-hint', '{{随机词:名字}} 从词表抽一个，{{随机词:名字:3}} 抽三个；{{随机数:名字}} 在范围里取整数。另有 {{random::a::b}} {{roll:1d6}} {{time}} {{date}} {{weekday}} {{篇幅}}，酒馆自己的宏也能用。'));
   const l2 = el('div', 'xjc-list');
@@ -663,6 +771,9 @@ function editText(kind, row) {
       const known = allTags(state[kind]);
       body.appendChild(field('标签', tg, known.length ? `已有：${known.join(' ')}` : ''));
     }
+    // 分组可放可不放；点输入框会列出已有的分组
+    const grp = isPre ? null : groupInput(kind, row?.group);
+    if (grp) body.appendChild(field('分组', grp, groupsOf(kind).length ? `已有：${groupsOf(kind).join('、')}` : '可以不填。填了库里就按组显示，编辑小剧场时也能整组选、从组里随机抽。'));
     const c = textarea(row?.content, isPre ? 12 : 8, isPre ? '整段 system 框架' : '可以用 {{user}} {{char}} {{篇幅}} {{随机词:世界}} 等宏');
     body.appendChild(field('内容', c));
     let def = null;
@@ -692,7 +803,7 @@ function editText(kind, row) {
     foot.appendChild(btn('保存', () => {
       const title = t.value.trim();
       if (!title) { toast('标题不能空'); return; }
-      const data = isPre ? { id: row?.id || uid('pre'), name: title, content: c.value } : { id: row?.id || uid(kind.slice(0, 3)), title, tags: textToTags(tg.value), content: c.value };
+      const data = isPre ? { id: row?.id || uid('pre'), name: title, content: c.value } : { id: row?.id || uid(kind.slice(0, 3)), title, tags: textToTags(tg.value), group: grp.value.trim().slice(0, 30), content: c.value };
       const saved = upsert(kind, data);
       if (isPre && def.input.checked) setSetting({ defaultPreambleId: saved.id });
       if (asCombo?.input.checked) combosFromPrompts([saved], { output: { mode: 'mixed' } }).then(() => toast('也建成了一个小剧场'));
@@ -776,7 +887,19 @@ function editCombo(row, draft = null) {
 
     body.appendChild(el('div', 'xjc-sec', '随机'));
     const rc = select([0, 1, 2, 3, 4, 5].map(n => ({ v: String(n), l: n ? `抽 ${n} 条` : '不抽' })), String(d.random.count || 0));
-    const rtags = allTags(state.randoms);
+    // 可以抽的分组：随机池的组和提示词库的组
+    d.random.groups = [...(d.random.groups || [])];
+    const groupChoices = [...groupsOf('randoms').map(g => ({ v: `randoms/${g}`, l: `随机池 · ${g}` })), ...groupsOf('prompts').map(g => ({ v: `prompts/${g}`, l: `提示词 · ${g}` }))];
+    const groupBox = el('div', 'xjc-chips');
+    if (!groupChoices.length) groupBox.appendChild(el('span', 'xjc-hint', '还没有分组；在「库」里给提示词或随机条目填上分组就能选'));
+    for (const o of groupChoices) {
+      const c = el('button', 'xjc-chip' + (d.random.groups.includes(o.v) ? ' on' : ''), o.l);
+      c.type = 'button';
+      c.onclick = () => { const i = d.random.groups.indexOf(o.v); if (i >= 0) d.random.groups.splice(i, 1); else d.random.groups.push(o.v); c.classList.toggle('on', i < 0); };
+      groupBox.appendChild(c);
+    }
+    const groupF = field('从分组抽', groupBox, '都不选 = 从整个随机池抽。选了就只从这些组里抽，提示词库的组也能选（比如把几种塔罗形式放进一个组）。');
+    const rtags = allTags([...state.randoms, ...state.prompts.filter(p => (p.group || '').trim())]);
     const tagPick = key => {
       const box = el('div', 'xjc-chips');
       if (!rtags.length) box.appendChild(el('span', 'xjc-hint', '随机池还没有标签'));
@@ -788,11 +911,11 @@ function editCombo(row, draft = null) {
       }
       return box;
     };
-    const incF = field('只抽', tagPick('include'), '点选标签；都不选 = 全池');
+    const incF = field('只抽', tagPick('include'), '点选标签；都不选 = 不限标签');
     const excF = field('排除', tagPick('exclude'), '带这些标签的不抽');
-    const syncRandom = () => { incF.hidden = excF.hidden = rc.value === '0'; };
+    const syncRandom = () => { groupF.hidden = incF.hidden = excF.hidden = rc.value === '0'; };
     rc.addEventListener('change', syncRandom);
-    body.append(field('随机池', rc, `池里共 ${state.randoms.length} 条`), incF, excF);
+    body.append(field('随机抽几条', rc, `随机池共 ${state.randoms.length} 条`), groupF, incF, excF);
     syncRandom();
 
     body.appendChild(el('div', 'xjc-sec', '输出'));
@@ -871,7 +994,7 @@ function editCombo(row, draft = null) {
 
     const collect = () => ({
       ...d, id: d.id || uid('c'), name: name.value.trim() || '未命名小剧场', tags: textToTags(tg.value), preambleId: pre.value,
-      random: { count: Number(rc.value) || 0, include: [...(d.random.include || [])], exclude: [...(d.random.exclude || [])] },
+      random: { count: Number(rc.value) || 0, include: [...(d.random.include || [])], exclude: [...(d.random.exclude || [])], groups: [...(d.random.groups || [])] },
       output: { ...d.output, length: lenSel.value, customChars: Math.max(50, Number(customChars.value) || 900), style: styleSel.value, wrapTag: wrap.value.trim().replace(/[^\w-]/g, '') },
       context: d.context ? { ...ctxDraft, rounds: Math.max(1, Math.min(100, Number(rounds.value) || 12)), worldInfo: wi.input.checked, summary: sm.input.checked } : null,
       whoText: whoText.value.trim(), api: api.value, weight: Math.max(0, Number(weight.value) || 0),
@@ -924,19 +1047,35 @@ function pickPrompts(selected, done) {
         chips.appendChild(c);
       }
       list.innerHTML = '';
-      const shown = state.prompts.filter(x => (!filter || (x.tags || []).includes(filter)) && (!q || (x.title + x.content).toLowerCase().includes(q)));
+      const shown = state.prompts.filter(x => (!filter || (x.tags || []).includes(filter)) && (!q || (x.title + x.content + (x.group || '')).toLowerCase().includes(q)));
       if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的提示词'));
-      for (const p of shown) {
+      const boxes = new Map();
+      const rowOf = p => {
         const row = el('label', 'xjc-check');
         const cb = el('input');
         cb.type = 'checkbox';
         cb.checked = chosen.has(p.id);
         cb.onchange = () => (cb.checked ? chosen.add(p.id) : chosen.delete(p.id));
+        boxes.set(p.id, cb);
         const mid = el('div', 'xjc-grow');
         mid.append(el('div', '', `${p.title} ${(p.tags || []).map(t => '#' + t).join(' ')}`), el('div', 'd', p.content));
         row.append(cb, mid);
-        list.appendChild(row);
-      }
+        return row;
+      };
+      // 每组一个「整组加入」：组里都勾上了就变成「整组去掉」
+      const whole = (g, inG) => {
+        const b = btn('', e => {
+          e.stopPropagation();
+          const all = inG.every(p => chosen.has(p.id));
+          for (const p of inG) { if (all) chosen.delete(p.id); else chosen.add(p.id); const cb = boxes.get(p.id); if (cb) cb.checked = !all; }
+          paintWhole();
+        }, 'xjc-btn sm');
+        const paintWhole = () => { b.textContent = inG.every(p => chosen.has(p.id)) ? '整组去掉' : '整组加入'; };
+        paintWhole();
+        list.addEventListener('change', paintWhole);
+        return b;
+      };
+      if (shown.length) groupedList(list, 'prompts', shown, rowOf, { open: !!(q || filter), manage: false, headExtra: whole });
     };
     draw();
     body.append(chips, list);
@@ -957,10 +1096,13 @@ function importFlow() {
     body.appendChild(ta);
     let kind = 'prompts';
     const asCombo = toggle('每条同时建成一个小剧场（直接能在舞台上选）', false);
-    body.appendChild(field('文本导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; })));
+    body.appendChild(field('文本导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; impGroupF.hidden = v === 'preambles'; })));
     body.appendChild(asCombo);
+    const impGroup = input('', '可以不填');
+    const impGroupF = field('放进分组', impGroup);
+    body.appendChild(impGroupF);
     const importRows = async rows => {
-      const made = await addRows(kind, rows);
+      const made = await addRows(kind, rows, kind === 'preambles' ? {} : { group: impGroup.value });
       let msg = `导入 ${rows.length} 条${{ prompts: '提示词', preambles: '前置要求', randoms: '随机条目' }[kind]}`;
       if (kind === 'prompts' && asCombo.input.checked) { await combosFromPrompts(made); msg += `，建了 ${made.length} 个小剧场`; }
       closeIt(); refresh(); toast(msg, 'success');
@@ -999,8 +1141,10 @@ function pickLoose(found) {
     body.appendChild(el('p', 'xjc-hint', `没认出这个格式，把里面像提示词的 ${found.length} 段列出来了。勾上要的；点正文能展开看全文。`));
     const tagIn = input('', '空格分隔，可空');
     const tagF = field('统一加标签', tagIn);
-    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; tagF.hidden = v === 'preambles'; })));
-    body.appendChild(tagF);
+    const jGroup = input('', '可以不填');
+    const jGroupF = field('放进分组', jGroup);
+    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; tagF.hidden = jGroupF.hidden = v === 'preambles'; })));
+    body.append(tagF, jGroupF);
     if (found.length > 8) {
       const search = input('', '搜名字 / 内容');
       search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
@@ -1011,7 +1155,7 @@ function pickLoose(found) {
     const okBtn = btn('导入', async () => {
       if (!picked.size) { toast('先勾几条'); return; }
       const tags = kind === 'preambles' ? [] : textToTags(tagIn.value);
-      await addRows(kind, found.filter((f, i) => picked.has(i)).map(f => ({ title: f.name, content: f.content, tags: [...tags] })));
+      await addRows(kind, found.filter((f, i) => picked.has(i)).map(f => ({ title: f.name, content: f.content, tags: [...tags] })), kind === 'preambles' ? {} : { group: jGroup.value });
       closeIt(); renderLibrary(); toast(`导入 ${picked.size} 条`, 'success');
     }, 'xjc-btn pri');
     const paintOk = () => { okBtn.textContent = picked.size ? `导入 ${picked.size} 条` : '导入'; okBtn.disabled = !picked.size; };
