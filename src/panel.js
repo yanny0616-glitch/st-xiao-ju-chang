@@ -19,7 +19,7 @@ import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks,
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { newPart, partPool, itemLabel, itemAlive, usesPrompt, comboPromptIds } from './parts.js';
 import { attachToLatest } from './chat.js';
-import { askNotifyPermission, notifyDone } from './notify.js';
+import { notifyDone } from './notify.js';
 
 let root = null, panelEl = null, bodyEl = null, kickerEl = null;
 let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', favFilter = 'all', promptFilter = '', favScope = 'char', favQuery = '';
@@ -546,7 +546,6 @@ function streamSegments(text) {
 
 export async function run(combo, extra = '', more = {}) {
   if (busy) { toast('上一篇还在写'); return; }
-  askNotifyPermission();
   if (!currentChar()) { toast(ctx().groupId ? '小剧场不支持群聊' : '先打开一个角色聊天'); return; }
   if (!isOpen()) open('stage');
   else if (tab !== 'stage') switchTab('stage');
@@ -601,7 +600,7 @@ export async function run(combo, extra = '', more = {}) {
     renderKicker();
     showResult(result);
     renderRecent();
-    // 不在页面上、或者面板关着 / 不在舞台：提醒一下
+    // 面板关着 / 不在舞台 / 页面在后台：用酒馆的提示提醒一下
     notifyDone(result.title, { seen: isOpen() && tab === 'stage', open: () => { open('stage'); showResult(result); } });
   } catch (e) {
     clearTimeout(pendingPaint);
@@ -1447,7 +1446,7 @@ function setGen(box) {
   mt.onchange = () => setSetting({ maxTokens: Math.max(256, Number(mt.value) || 4096) });
   box.appendChild(field('最大输出长度（token）', mt, '用于跟随酒馆和连接配置。HTML 小剧场很吃长度，建议 4000 以上。自配 API 在各自配置里设。'));
   box.appendChild(toggle('边写边显示', S().streamPreview !== false, v => setSetting({ streamPreview: v })));
-  box.appendChild(toggle('写好了提醒（不在页面上时发系统通知，面板关着时弹提示）', S().notifyDone !== false, v => { setSetting({ notifyDone: v }); if (v) askNotifyPermission(); }));
+  box.appendChild(toggle('写好了提醒（不在小剧场面板上时，酒馆里弹一条提示，点了去看）', S().notifyDone !== false, v => setSetting({ notifyDone: v })));
   box.appendChild(toggle('「随机」里也可能抽到 AI 自选', S().randomIncludesAi, v => setSetting({ randomIncludesAi: v })));
 
   // 全局值：小剧场里选「跟随全局」（新建的默认就是）时用这些；小剧场里选了自定的不受影响

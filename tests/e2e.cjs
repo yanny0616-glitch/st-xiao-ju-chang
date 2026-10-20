@@ -147,7 +147,7 @@ async function desktop(browser) {
   const whileHidden = await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').count();
   await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
   await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').first().waitFor({ timeout: 5000 }).catch(() => {});
-  ok(whileHidden === 0 && await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').count() === 1, '页面在后台时写好了（没开系统通知权限），回到页面补一条提示');
+  ok(whileHidden === 0 && await page.locator('#toast-container .toast-title:text-is("小剧场写好了")').count() === 1, '页面在后台时写好了，回到酒馆再弹提示');
   await page.evaluate(() => window.toastr?.clear());
   const call1 = lastCall();
   ok(call1.stream === true, '跟随酒馆当前 API 也发流式请求（酒馆里流式关着也一样），长篇不会被中转站超时掐断');

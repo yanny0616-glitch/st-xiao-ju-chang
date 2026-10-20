@@ -78,7 +78,11 @@ export async function generateFor(mesId, { combo, extra, follow } = {}) {
     state.settings.played = (Number(state.settings.played) || 0) + 1;
     save('settings');
     await pushTheater(msg, result);
-    notifyDone(result.title, { open: () => mesEl(ctx().chat.indexOf(msg))?.scrollIntoView({ block: 'center' }), seen: !document.hidden });
+    // 那一楼在屏幕上就不用提醒；翻到别处了、或者面板开着挡住聊天，就弹一条，点了滚回那一楼
+    const node = mesEl(ctx().chat.indexOf(msg));
+    const r = node?.getBoundingClientRect();
+    const onScreen = !!r && r.bottom > 0 && r.top < window.innerHeight && !document.querySelector('.xjc-root:not([hidden])');
+    notifyDone(result.title, { seen: onScreen, open: () => { window.XiaoJuChang?.close?.(); mesEl(ctx().chat.indexOf(msg))?.scrollIntoView({ block: 'center' }); } });
   } catch (e) {
     if (!ctrl.signal.aborted) fail(new Error(`小剧场没写出来：${e.message || e}`));
   } finally {

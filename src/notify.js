@@ -1,35 +1,21 @@
-// 写完提醒：页面在后台时发系统通知（浏览器允许的话；不允许就等回到页面再补一条提示），
-// 在页面上但看不到这篇（面板关着、不在舞台）时弹一条可点的提示
+// 写好了提醒：用酒馆自己的提示（顶上弹出的那种，位置跟着酒馆的设置）。人在酒馆里但看不到这篇时（面板关着、不在舞台、楼层不在屏幕上）弹一条，点了去看；
+// 页面在后台时提示会在看不到的时候就消失，所以先记着，回到页面再弹
 import { state } from './store.js';
 
 const on = () => state.settings.notifyDone !== false;
 let missed = [];
-
-/** 点「生成」时顺手问一次通知权限（浏览器要求在点击里问） */
-export function askNotifyPermission() {
-  if (!on()) return;
-  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {}); } catch { /* ignore */ }
-}
 
 function popToast(text, open) {
   if (!window.toastr) return;
   window.toastr.success(text, '小剧场写好了', { onclick: open, timeOut: 8000, extendedTimeOut: 4000 });
 }
 
-/** seen：用户此刻是不是正看着这篇；open：点通知后去哪 */
+/** seen：用户此刻是不是正看着这篇；open：点提示后去哪 */
 export function notifyDone(title, { seen = false, open = () => {} } = {}) {
   if (!on()) return;
-  const text = `《${title || '小剧场'}》${seen ? '' : '，点这里看'}`;
-  if (!document.hidden) { if (!seen) popToast(text, open); return; }
-  let shown = false;
-  try {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const n = new Notification('小剧场写好了', { body: `《${title || '小剧场'}》`, tag: 'xjc-done' });
-      n.onclick = () => { try { window.focus(); } catch { /* ignore */ } open(); n.close(); };
-      shown = true;
-    }
-  } catch { /* 有的 WebView 没有 Notification */ }
-  if (!shown) missed.push({ text: `《${title || '小剧场'}》，点这里看`, open });
+  const text = `《${title || '小剧场'}》，点这里看`;
+  if (document.hidden) missed.push({ text, open });
+  else if (!seen) popToast(text, open);
 }
 
 document.addEventListener('visibilitychange', () => {
