@@ -1,0 +1,11 @@
+{
+    "display_name": "小剧场",
+    "loading_order": 120,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "yanny",
+    "version": "0.1.0",
+    "homePage": "https://github.com/yanny0616-glitch/st-xiao-ju-chang"
+}
