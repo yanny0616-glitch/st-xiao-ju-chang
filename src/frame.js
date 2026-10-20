@@ -106,7 +106,8 @@ function canvasOverrides() {
 
 export function themeTokens() {
   const s = state.settings;
-  const size = Math.round(14 * (Number(s.fontScale) || 1) * 10) / 10;
+  // 正文字号 = 界面字号 × 正文自己的倍数
+  const size = Math.round(14 * (Number(s.uiScale) || 1) * (Number(s.fontScale) || 1) * 10) / 10;
   const lineHeight = LINE_HEIGHTS[s.lineHeight] || 1.6;
   const theme = themeName();
   const cs = getComputedStyle(document.documentElement);
@@ -219,6 +220,7 @@ export function updateReading() {
 
 /** 面板、全屏、聊天里的卡片都带 data-xjc-theme，换主题时一起改 */
 export function applyTheme() {
+  document.documentElement.style.setProperty('--xjc-fs', String(Number(state.settings.uiScale) || 1));
   syncCustomStyle();
   document.querySelectorAll('[data-xjc-theme]').forEach(markTheme);
   document.body.classList.toggle('xjc-motion-off', state.settings.motion === false);

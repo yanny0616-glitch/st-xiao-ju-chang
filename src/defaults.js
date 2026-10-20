@@ -59,7 +59,7 @@ const DEFAULT_COMBOS = [
 ];
 
 const DEFAULT_SETTINGS = Object.freeze({
-  theme: "magazine", fontScale: 1, lineHeight: "mid", canvas: "theme", played: 0, motion: true,
+  theme: "magazine", uiScale: 1, fontScale: 1, lineHeight: "mid", canvas: "theme", played: 0, motion: true,
   defaultWho: "persona", defaultChat: "recent", defaultRounds: 12, defaultWorldInfo: true, defaultSummary: true, writeBackDefault: false, writeBackFeature: false, defaultChannel: "own",
   lengthLimit: true, defaultLength: "medium", defaultStyle: "free", stagedDefault: false, streamPreview: true,
   randomIncludesAi: true, recentKeep: 10, currentComboId: "c_store", defaultPreambleId: "pre_strict",

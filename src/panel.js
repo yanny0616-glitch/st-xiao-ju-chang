@@ -1215,7 +1215,8 @@ function setLook(box) {
   if (ac) trow.appendChild(btn(`编辑「${ac.name}」`, () => editTheme(ac), 'xjc-btn sm pri'));
   box.appendChild(trow);
   box.appendChild(toggle('动效（抽屉滑入、生成时的转圈和闪烁光标）', S().motion !== false, v => { setSetting({ motion: v }); applyTheme(); }));
-  box.appendChild(field('小剧场字号', seg([{ v: 0.9, l: '小' }, { v: 1, l: '标准' }, { v: 1.1, l: '大' }, { v: 1.2, l: '特大' }].map(x => ({ v: String(x.v), l: x.l })), String(S().fontScale), v => { setSetting({ fontScale: Number(v) }); reread(); })));
+  box.appendChild(field('界面字号', seg([{ v: 0.8, l: '特小' }, { v: 0.9, l: '小' }, { v: 1, l: '标准' }, { v: 1.1, l: '大' }, { v: 1.2, l: '特大' }].map(x => ({ v: String(x.v), l: x.l })), String(S().uiScale ?? 1), v => { setSetting({ uiScale: Number(v) }); applyTheme(); }), '整个插件一起缩放：面板、全屏、聊天里挂的小剧场和正文。不跟酒馆的字号走。'));
+  box.appendChild(field('正文字号', seg([{ v: 0.9, l: '小' }, { v: 1, l: '标准' }, { v: 1.1, l: '大' }, { v: 1.2, l: '特大' }].map(x => ({ v: String(x.v), l: x.l })), String(S().fontScale), v => { setSetting({ fontScale: Number(v) }); reread(); }), '在界面字号的基础上，单独调小剧场正文。'));
   box.appendChild(field('行距', seg([{ v: 'tight', l: '紧' }, { v: 'mid', l: '适中' }, { v: 'loose', l: '松' }], S().lineHeight, v => { setSetting({ lineHeight: v }); reread(); })));
   box.appendChild(field('正文底色', seg(Object.entries(CANVAS_LABEL).map(([v, l]) => ({ v, l })), S().canvas, v => { setSetting({ canvas: v }); reread(); }), '正文的底色和文字色，默认跟着主题走。AI 写的 HTML 用 --xjc-bg 等变量就能配色一致。'));
 }

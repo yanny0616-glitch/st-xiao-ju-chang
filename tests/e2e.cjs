@@ -254,6 +254,25 @@ async function desktop(browser) {
   ok((await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.settings.theme)) === 'terminal', '主题存进设置');
   await page.click('.xjc-th[data-v=magazine]');
 
+  // 7b2. 输入框不吃酒馆主题的样式；界面字号整体缩放
+  const inputs = await page.evaluate(() => {
+    const st = document.createElement('style');
+    st.id = 'fake-st-theme';
+    st.textContent = 'body input, body textarea, body select { background-color: rgb(100, 100, 100) !important; color: rgb(1, 1, 1) !important; }';
+    document.head.appendChild(st);
+    const i = document.querySelector('.xjc-root input[type=text]');
+    const cs = getComputedStyle(i);
+    const r = [cs.backgroundColor, cs.color];
+    st.remove();
+    return r;
+  });
+  ok(!inputs.includes('rgb(100, 100, 100)') && !inputs.includes('rgb(1, 1, 1)'), `输入框用小剧场主题的颜色，不跟酒馆主题（${inputs}）`);
+  const fs0 = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.xjc-panel')).fontSize));
+  await page.click('.xjc-field:has-text("界面字号") .xjc-seg button:has-text("特小")');
+  const fs1 = await page.evaluate(() => [parseFloat(getComputedStyle(document.querySelector('.xjc-panel')).fontSize), parseFloat(getComputedStyle(document.querySelector('.xjc-hd h2')).fontSize)]);
+  ok(Math.abs(fs1[0] - fs0 * 0.8) < 0.2 && fs1[1] < 30 * 0.85, `界面字号「特小」整体缩小（${fs0} → ${fs1}）`);
+  await page.click('.xjc-field:has-text("界面字号") .xjc-seg button:has-text("标准")');
+
   // 7c. 新主题、导入 CSS 自定义主题、动效开关
   await page.click('.xjc-th[data-v=xuan]');
   ok(await page.evaluate(() => document.querySelector('.xjc-root').dataset.xjcTheme) === 'xuan', '新主题「宣纸」能用');
