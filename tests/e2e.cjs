@@ -37,7 +37,7 @@ async function setupData(page) {
     }
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
     for (const k of [...s.LIBRARY, ...s.HEAVY]) s.state[k] = [];
-    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', tail: { ...s.state.settings.tail, auto: false, button: true } };
+    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, auto: false, button: true } };
     s.seedDefaults(false);
     await s.saveAll();
     c.saveSettingsDebounced();
@@ -228,6 +228,24 @@ async function desktop(browser) {
   await page.waitForFunction(() => document.querySelectorAll('#chat .mes .xjc-tail-card').length >= 2 && !document.querySelector('.xjc-tail-busy'), null, { timeout: 30000 });
   ok(true, '消息按钮出了一篇');
   await page.screenshot({ path: `${SHOTS}/d-07-chat-tail.png` });
+
+  // 7b. 换主题：面板、聊天卡片、iframe 正文一起换，不用重开
+  ok(await page.evaluate(() => document.querySelector('.xjc-root').dataset.xjcTheme) === 'magazine', '默认主题是杂志');
+  await page.evaluate(() => window.XiaoJuChang.open('settings'));
+  await page.click('.xjc-view[data-view=settings] .xjc-seg button:has-text("外观")');
+  await page.click('.xjc-th[data-v=terminal]');
+  await page.waitForTimeout(400);
+  const th = await page.evaluate(() => ({
+    root: document.querySelector('.xjc-root').dataset.xjcTheme,
+    tails: [...document.querySelectorAll('.xjc-tail-card')].every(n => n.dataset.xjcTheme === 'terminal'),
+    frame: document.querySelector('.xjc-tail-card iframe')?.contentDocument === null,
+  }));
+  ok(th.root === 'terminal' && th.tails, '换成终端：面板和聊天卡片都换了');
+  const frameTheme = await page.frames().find(f => f.parentFrame() && f.url() === 'about:srcdoc')?.evaluate(() => [document.documentElement.dataset.t, getComputedStyle(document.body).backgroundColor]);
+  ok(frameTheme && frameTheme[0] === 'terminal' && frameTheme[1] === 'rgb(15, 20, 17)', `正文 iframe 跟着换（${frameTheme}）`);
+  ok((await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.settings.theme)) === 'terminal', '主题存进设置');
+  await page.click('.xjc-th[data-v=magazine]');
+  await page.evaluate(() => window.XiaoJuChang.close());
 
   // 8. 自动出（概率 100）
   await page.evaluate(async () => {

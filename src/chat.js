@@ -1,9 +1,9 @@
 // 聊天里的小剧场：消息菜单里的面具按钮、AI 回复后自动出、挂在消息下面显示。
 // 存在 message.extra.xjc（跟着 swipe 走），不进 mes 正文，所以不会发给模型
 import { ctx, el, uid, byId, toast, fail, copyText } from './util.js';
-import { state } from './store.js';
+import { state, save } from './store.js';
 import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, resultPlainText, KIND_LABEL, kindOf } from './gen.js';
-import { mountFrame } from './frame.js';
+import { mountFrame, themeName } from './frame.js';
 import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
 import { isFavorite, toggleFavorite } from './favs.js';
@@ -71,6 +71,8 @@ export async function generateFor(mesId, { combo, extra } = {}) {
     const result = await generateTheater(use, { uptoIndex: mesId, extra: [tail, extra].filter(Boolean).join('\n'), signal: ctrl.signal });
     if (!result || ctrl.signal.aborted) return;
     running.delete(msg);
+    state.settings.played = (Number(state.settings.played) || 0) + 1;
+    save('settings');
     await pushTheater(msg, result);
   } catch (e) {
     if (!ctrl.signal.aborted) fail(new Error(`小剧场没写出来：${e.message || e}`));
@@ -95,6 +97,7 @@ async function confirmDelete() {
 function tailCard(mesId, theater) {
   const card = el('div', 'xjc-tail-card');
   card.dataset.id = theater.id;
+  card.dataset.xjcTheme = themeName();
   const hd = el('div', 'xjc-tail-hd');
   const ttl = el('div', 'ttl');
   ttl.innerHTML = '<b><i class="fa-solid fa-masks-theater"></i> 小剧场</b>';
@@ -160,6 +163,7 @@ export function renderTail(mesId) {
   if (!list.length && !job) { box?.remove(); return; }
   if (!box) {
     box = el('div', 'xjc-tail');
+    box.dataset.xjcTheme = themeName();
     const text = node.querySelector('.mes_text');
     if (text) text.after(box); else node.querySelector('.mes_block')?.appendChild(box);
   }

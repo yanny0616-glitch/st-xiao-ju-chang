@@ -7,7 +7,7 @@ import { buildMaterials, callModel, resolveTarget, userName } from './host.js';
 
 const STYLE_HINT = {
   free: '',
-  vars: '样式提示：页面外层已定义 CSS 变量 --xjc-bg（底色）--xjc-ink（文字）--xjc-acc（强调色）--xjc-line（细线）--xjc-font（字体），优先使用它们，让画面和酒馆主题协调；其余自由发挥。',
+  vars: '样式提示：页面外层已定义 CSS 变量 --xjc-bg（底色）--xjc-ink（文字）--xjc-acc（强调色）--xjc-line（细线）--xjc-font（字体），优先使用它们，让画面和小剧场当前的主题协调；其余自由发挥。',
   strict: '样式约束：颜色只能使用 CSS 变量 --xjc-bg --xjc-ink --xjc-acc --xjc-line（可用 color-mix 或透明度派生），字体只用 --xjc-font；不得自带其他颜色值。',
 };
 

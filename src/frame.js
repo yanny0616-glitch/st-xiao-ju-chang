@@ -1,5 +1,5 @@
 // 渲染：AI 写的 HTML/JS 整块放进沙盒 iframe（没有 allow-same-origin，拿不到酒馆的页面、存储和密钥）；
-// 纯文字也进同一种 iframe，颜色跟酒馆主题或选定的画布
+// 纯文字也进同一种 iframe，配色和字体跟小剧场主题（或选定的画布）
 import { esc } from './util.js';
 import { state } from './store.js';
 
@@ -45,20 +45,35 @@ function over(top, bottom) {
   return { r: top.r * a + bottom.r * (1 - a), g: top.g * a + bottom.g * (1 - a), b: top.b * a + bottom.b * (1 - a), a: 1 };
 }
 
+const SANS = "-apple-system,'PingFang SC','Noto Sans CJK SC','Microsoft YaHei',sans-serif";
+const MONO = "ui-monospace,Menlo,Consolas,'DejaVu Sans Mono','Noto Sans Mono CJK SC',monospace";
+const COURIER = "'Courier Prime','Courier New',Courier,'Liberation Mono','Noto Sans Mono CJK SC',monospace";
+/** 每套主题正文画布的颜色和字体 */
+const THEME_CANVAS = {
+  magazine: { bg: '#fbf8f2', ink: '#1c1a17', acc: '#8b2e2e', line: '#d9d1c3', font: SANS },
+  sticky: { bg: '#f1ece2', ink: '#2b2622', acc: '#e0572f', line: '#d8cfc0', font: SANS },
+  terminal: { bg: '#0f1411', ink: '#cfe7d4', acc: '#7ee787', line: '#213528', font: MONO },
+  script: { bg: '#ffffff', ink: '#141414', acc: '#c0392b', line: '#dcdcd6', font: COURIER },
+};
 const CANVASES = {
   paper: { bg: '#f6f1e8', ink: '#24211d', acc: '#9a3b2e', line: '#ddd3c2' },
   night: { bg: '#16171c', ink: '#e6e3dc', acc: '#d8a657', line: '#33353d' },
 };
-export const CANVAS_LABEL = { theme: '跟随酒馆主题', paper: '纸张', night: '夜色' };
+export const CANVAS_LABEL = { theme: '跟主题', paper: '纸张', night: '夜色' };
+export const themeName = () => (THEME_CANVAS[state.settings.theme] || state.settings.theme === 'st' ? state.settings.theme : 'magazine');
 
-/** 酒馆主题色多半是半透明的，iframe 里要实色：叠在一块按文字明暗推出的底色上 */
 export function themeTokens() {
   const s = state.settings;
   const size = Math.round(14 * (Number(s.fontScale) || 1) * 10) / 10;
   const lineHeight = LINE_HEIGHTS[s.lineHeight] || 1.6;
+  const theme = themeName();
   const cs = getComputedStyle(document.documentElement);
-  const font = (cs.getPropertyValue('--mainFontFamily') || getComputedStyle(document.body).fontFamily || 'sans-serif').trim().replace(/"/g, "'");
-  if (CANVASES[s.canvas]) return { ...CANVASES[s.canvas], font, size, lineHeight };
+  const stFont = (cs.getPropertyValue('--mainFontFamily') || getComputedStyle(document.body).fontFamily || 'sans-serif').trim().replace(/"/g, "'");
+  const base = THEME_CANVAS[theme];
+  const font = base ? base.font : stFont;
+  if (CANVASES[s.canvas]) return { ...CANVASES[s.canvas], font, size, lineHeight, theme };
+  if (base) return { ...base, size, lineHeight, theme };
+  // 「酒馆」主题：酒馆主题色多半是半透明的，iframe 里要实色，叠在一块按文字明暗推出的底色上
   const ink = parseColor(cs.getPropertyValue('--SmartThemeBodyColor')) || { r: 220, g: 220, b: 210, a: 1 };
   const dark = lum(ink) > 0.5;
   const floor = dark ? { r: 22, g: 22, b: 26, a: 1 } : { r: 250, g: 249, b: 246, a: 1 };
@@ -70,7 +85,7 @@ export function themeTokens() {
     bg: rgb(bg), ink: rgb({ ...ink, a: 1 }),
     acc: accC ? rgb(accC) : (dark ? '#e0a96d' : '#9a3b2e'),
     line: lineC ? rgb(over(lineC, bg)) : (dark ? '#3a3a40' : '#d9d4c8'),
-    font, size, lineHeight,
+    font, size, lineHeight, theme,
   };
 }
 
@@ -82,7 +97,7 @@ function frameDoc(segments, id, fill) {
   const t = themeTokens();
   const body = segments.map(s => (s.type === 'html' ? `<div class="xjc-html">${s.content}</div>` : `<article class="xjc-text">${textToHtml(s.content)}</article>`)).join('\n');
   const script = 'script';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+  return `<!doctype html><html data-t="${t.theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 :root{--xjc-bg:${t.bg};--xjc-ink:${t.ink};--xjc-acc:${t.acc};--xjc-line:${t.line};--xjc-font:${t.font}}
 html,body{margin:0;padding:0;background:var(--xjc-bg);color:var(--xjc-ink);font-family:var(--xjc-font);font-size:${t.size}px;line-height:${t.lineHeight};-webkit-text-size-adjust:100%}
 #xjc-content{display:flow-root;padding:${fill ? '14px 16px 48px' : '12px 14px'}}
@@ -95,10 +110,15 @@ html,body{margin:0;padding:0;background:var(--xjc-bg);color:var(--xjc-ink);font-
 @keyframes xjc-sh{to{background-position:-200% 0}}
 .xjc-text.writing p:last-child::after{content:"▍";margin-left:1px;color:var(--xjc-acc);animation:xjc-bl 1s steps(2) infinite}
 @keyframes xjc-bl{50%{opacity:0}}
+html[data-t=magazine] .xjc-text:first-child p:first-child::first-letter{float:left;font-family:'Songti SC','Noto Serif CJK SC','Noto Serif SC',Georgia,serif;font-size:3em;line-height:.85;padding:.12em .14em 0 0;color:var(--xjc-acc);font-weight:700}
+html[data-t=sticky] body{font-weight:500}
+html[data-t=terminal] .xjc-text p,html[data-t=script] .xjc-text p{text-align:left}
+html[data-t=terminal] .xjc-text p{padding-left:1.2em;position:relative}
+html[data-t=terminal] .xjc-text p::before{content:"│";position:absolute;left:0;color:var(--xjc-line)}
 </style></head><body><div id="xjc-content">${body}</div>
 <${script}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
 if(window.ResizeObserver){new ResizeObserver(send).observe(content)}window.addEventListener("load",send);setInterval(send,700);send();
-window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
 document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${script}>
 </body></html>`;
 }
@@ -132,11 +152,23 @@ export function mountFrame(container, segments, opts = {}) {
   };
 }
 
-/** 改了字号/行距：送进所有开着的 iframe，不重载，保留交互状态 */
+/** 改了字号/行距/主题/画布：送进所有开着的 iframe，不重载，保留交互状态 */
 export function updateReading() {
   const t = themeTokens();
+  const vars = { '--xjc-bg': t.bg, '--xjc-ink': t.ink, '--xjc-acc': t.acc, '--xjc-line': t.line, '--xjc-font': t.font };
   for (const [id, entry] of frames) {
     if (!entry.iframe.isConnected) { frames.delete(id); continue; }
-    try { entry.iframe.contentWindow?.postMessage({ source: 'xjc-parent', type: 'reading', id, size: t.size, lineHeight: t.lineHeight }, '*'); } catch { /* ignore */ }
+    try {
+      const w = entry.iframe.contentWindow;
+      w?.postMessage({ source: 'xjc-parent', type: 'reading', id, size: t.size, lineHeight: t.lineHeight }, '*');
+      w?.postMessage({ source: 'xjc-parent', type: 'theme', id, vars, theme: t.theme }, '*');
+    } catch { /* ignore */ }
   }
+}
+
+/** 面板、全屏、聊天里的卡片都带 data-xjc-theme，换主题时一起改 */
+export function applyTheme() {
+  const t = themeName();
+  document.querySelectorAll('[data-xjc-theme]').forEach(n => { n.dataset.xjcTheme = t; });
+  updateReading();
 }

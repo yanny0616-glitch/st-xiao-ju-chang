@@ -1,6 +1,6 @@
 // 表单控件、面板内抽屉、确认框、全屏查看器
 import { el, btn, esc, fmtTime } from './util.js';
-import { mountFrame } from './frame.js';
+import { mountFrame, themeName } from './frame.js';
 import { segmentsOf, contextLabel, KIND_LABEL, kindOf, charCount } from './gen.js';
 import { targetLabel } from './host.js';
 
@@ -142,6 +142,7 @@ export function openViewer(result, { actions = [], onAction } = {}) {
   closeViewer();
   const root = el('div', 'xjc-viewer');
   root.dataset.ttMobileSurface = 'backdrop';
+  root.dataset.xjcTheme = themeName();
   const bar = el('div', 'xjc-viewer-bar');
   bar.appendChild(btn('‹ 返回', closeViewer, 'xjc-btn ghost sm'));
   bar.appendChild(el('div', 'ttl', result.title || '小剧场'));

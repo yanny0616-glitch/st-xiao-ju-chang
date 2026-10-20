@@ -7,7 +7,7 @@ import {
   generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, segmentsOf, kindOf, KIND_LABEL, charCount,
   resultPlainText, contextLabel, postProcess,
 } from './gen.js';
-import { mountFrame, updateReading, CANVAS_LABEL } from './frame.js';
+import { mountFrame, updateReading, applyTheme, themeName, CANVAS_LABEL } from './frame.js';
 import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
   closeTopSheet, confirmSheet, snapshotInfo, openViewer, closeViewer, viewerOpen,
@@ -16,7 +16,7 @@ import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks,
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { attachToLatest } from './chat.js';
 
-let root = null, panelEl = null, bodyEl = null;
+let root = null, panelEl = null, bodyEl = null, kickerEl = null;
 let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', promptFilter = '';
 const views = {};
 const stageBox = {};
@@ -35,26 +35,31 @@ function build() {
   root = el('div', 'xjc-root');
   root.hidden = true;
   root.dataset.ttMobileSurface = 'backdrop';
+  root.dataset.xjcTheme = themeName();
   root.addEventListener('click', e => { if (e.target === root) close(); });
   panelEl = el('div', 'xjc-panel');
   const hd = el('div', 'xjc-hd');
+  const txt = el('div', 'xjc-hd-txt xjc-grow');
+  kickerEl = el('div', 'xjc-kicker');
   const h = el('h2');
   h.innerHTML = '小剧场<small>THÉÂTRE DE POCHE</small>';
-  hd.append(h, el('div', 'xjc-grow'));
+  txt.append(kickerEl, h);
+  hd.appendChild(txt);
   const x = el('button', 'xjc-x', '✕');
   x.type = 'button';
   x.setAttribute('aria-label', '关闭');
   x.onclick = close;
   hd.appendChild(x);
   const tabs = el('div', 'xjc-tabs');
-  for (const t of TABS) {
+  TABS.forEach((t, i) => {
     const b = el('button');
     b.type = 'button';
     b.dataset.v = t.v;
+    b.dataset.k = String(i + 1);
     b.innerHTML = `<i class="${t.i}"></i><span>${t.l}</span>`;
     b.onclick = () => switchTab(t.v);
     tabs.appendChild(b);
-  }
+  });
   bodyEl = el('div', 'xjc-body');
   for (const t of TABS) {
     views[t.v] = el('section', 'xjc-view');
@@ -86,8 +91,18 @@ export function close() {
 export const isOpen = () => !!root && !root.hidden;
 export function refresh() { if (isOpen()) switchTab(tab); }
 
+/** 报头：第几篇 · 日期 */
+function renderKicker() {
+  if (!kickerEl) return;
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  kickerEl.innerHTML = '';
+  kickerEl.append(el('span', 'no', `NO. ${String((Number(state.settings.played) || 0) + 1).padStart(3, '0')}`), el('span', 'date', `${d.getFullYear()} · ${p(d.getMonth() + 1)} · ${p(d.getDate())}`));
+}
+
 function switchTab(v) {
   tab = v;
+  renderKicker();
   panelEl.querySelectorAll('.xjc-tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   for (const [k, node] of Object.entries(views)) node.hidden = k !== v;
   if (v === 'stage') renderStage();
@@ -165,6 +180,7 @@ function renderPick() {
   }
   box.appendChild(strip);
   const card = el('div', 'xjc-combo-card');
+  card.dataset.scene = String(state.combos.indexOf(cur) + 1);
   const row = el('div', 'xjc-row nowrap');
   row.append(el('div', 'nm xjc-grow', cur.name), btn('编辑', () => editCombo(cur), 'xjc-btn sm ghost'));
   card.append(row, comboChips(cur));
@@ -204,6 +220,7 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
   const host = stageBox.result;
   host.innerHTML = '';
   const card = el('article', 'xjc-result');
+  card.dataset.stdout = pending ? 'stdout · writing…' : `stdout · ${fmtTime(result.createdAt)} · ${charCount(result)} chars`;
   const hd = el('div', 'xjc-result-hd');
   const snap = result.snapshot || {};
   const picks = snap.randoms || [];
@@ -338,6 +355,8 @@ export async function run(combo, extra = '') {
     save('recent');
     const c = byId(state.combos, combo.id);
     if (c) { c.plays = (c.plays || 0) + 1; save('combos'); }
+    setSetting({ played: (Number(state.settings.played) || 0) + 1 });
+    renderKicker();
     showResult(result);
     renderRecent();
   } catch (e) {
@@ -388,7 +407,7 @@ function libCombos(box) {
   const row = el('div', 'xjc-row');
   row.append(btn('＋ 新建小剧场', () => editCombo(null), 'xjc-btn pri'), btn('导入', importFlow, 'xjc-btn'));
   box.appendChild(row);
-  const list = el('div', 'xjc-list');
+  const list = el('div', 'xjc-list xjc-cards');
   list.style.marginTop = '12px';
   if (!state.combos.length) list.appendChild(el('div', 'xjc-empty', '一个小剧场 = 前置要求 + 几条提示词 + 随机规则 + 输出方式。'));
   for (const c of state.combos) {
@@ -922,11 +941,32 @@ function setChat(box) {
   box.appendChild(toggle('默认展开', t.expanded, v => put({ expanded: v })));
 }
 
+const THEMES = [
+  { v: 'magazine', l: '杂志', d: '米白纸面 · 宋体报头', pv: 'mag' },
+  { v: 'sticky', l: '便签墙', d: '彩色便签 · 胶带', pv: 'stk' },
+  { v: 'terminal', l: '终端', d: '黑底绿字 · 等宽', pv: 'trm' },
+  { v: 'script', l: '剧本', d: '打字机 · 装订孔', pv: 'scr' },
+  { v: 'st', l: '酒馆', d: '跟你的酒馆 UI 主题', pv: 'st' },
+];
 function setLook(box) {
   const reread = () => { updateReading(); };
+  const grid = el('div', 'xjc-themes');
+  for (const t of THEMES) {
+    const b = el('button', 'xjc-th' + (themeName() === t.v ? ' on' : ''));
+    b.type = 'button';
+    b.dataset.v = t.v;
+    b.append(el('div', `pv pv-${t.pv}`), el('b', '', t.l), el('span', '', t.d));
+    b.onclick = () => {
+      setSetting({ theme: t.v });
+      grid.querySelectorAll('.xjc-th').forEach(x => x.classList.toggle('on', x === b));
+      applyTheme();
+    };
+    grid.appendChild(b);
+  }
+  box.appendChild(field('主题', grid, '面板、正文、全屏和聊天里挂的小剧场一起换。'));
   box.appendChild(field('小剧场字号', seg([{ v: 0.9, l: '小' }, { v: 1, l: '标准' }, { v: 1.1, l: '大' }, { v: 1.2, l: '特大' }].map(x => ({ v: String(x.v), l: x.l })), String(S().fontScale), v => { setSetting({ fontScale: Number(v) }); reread(); })));
   box.appendChild(field('行距', seg([{ v: 'tight', l: '紧' }, { v: 'mid', l: '适中' }, { v: 'loose', l: '松' }], S().lineHeight, v => { setSetting({ lineHeight: v }); reread(); })));
-  box.appendChild(field('画布颜色', seg(Object.entries(CANVAS_LABEL).map(([v, l]) => ({ v, l })), S().canvas, v => { setSetting({ canvas: v }); if (current) showResult(current.result); }), '小剧场正文的底色和文字色。跟随酒馆主题时取你 UI 主题的颜色；AI 写的 HTML 用 --xjc-bg 等变量就能配色一致。改了之后新打开的小剧场生效。'));
+  box.appendChild(field('正文底色', seg(Object.entries(CANVAS_LABEL).map(([v, l]) => ({ v, l })), S().canvas, v => { setSetting({ canvas: v }); reread(); }), '正文的底色和文字色，默认跟着主题走。AI 写的 HTML 用 --xjc-bg 等变量就能配色一致。'));
 }
 
 function setData(box) {
