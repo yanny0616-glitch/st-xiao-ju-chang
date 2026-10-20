@@ -160,8 +160,14 @@ async function desktop(browser) {
   await page.click('.xjc-tabs button[data-v="library"]');
   await page.click('text=＋ 新建小剧场');
   await page.fill('.xjc-sheet input[placeholder^="比如：深夜"]', '目击帖测试');
-  await page.click('.xjc-sheet .xjc-seg >> text=HTML');
-  await page.check('.xjc-sheet .xjc-toggle:has-text("分两步出") input');
+  ok(await page.locator('.xjc-sheet .xjc-field:has(> .lb:text-is("只抽"))').isHidden(), '随机选「不抽」时不显示「只抽 / 排除」');
+  ok(await page.locator('.xjc-sheet .xjc-field:has(> .lb:text-is("带几轮"))').isHidden() && await page.locator('.xjc-sheet .xjc-field:has(> .lb:text-is("材料")) button.on').textContent() === '跟随全局', '新建小剧场的材料默认「跟随全局」，不展开具体选项');
+  await page.click('.xjc-sheet .xjc-field:has(> .lb:text-is("材料")) .xjc-seg button:text-is("自定")');
+  ok(await page.locator('.xjc-sheet .xjc-field:has(> .lb:text-is("带几轮"))').isVisible(), '选「自定」才出现带几轮、世界书');
+  await page.click('.xjc-sheet .xjc-field:has(> .lb:text-is("材料")) .xjc-seg button:text-is("跟随全局")');
+  ok(await page.evaluate(() => { const i = document.querySelector('.xjc-sheet .xjc-toggle input'); return !i || getComputedStyle(i, '::before').content === 'none'; }), '开关上没有酒馆复选框的勾');
+  await page.click('.xjc-sheet .xjc-seg button:text-is("HTML")');
+  await page.click('.xjc-sheet .xjc-field:has(> .lb:text-is("分两步出")) .xjc-seg button:text-is("分两步")');
   await page.screenshot({ path: `${SHOTS}/d-04-combo-editor.png` });
   await page.click('.xjc-sheet-ft >> text="保存"');
   await page.click('.xjc-tabs button[data-v="stage"]');
@@ -385,6 +391,36 @@ async function desktop(browser) {
   });
   await page.evaluate(() => window.XiaoJuChang.close());
 
+  // 7g. 跟随全局：改全局轮数，跟随的小剧场跟着变；上下文和酒馆一样（隐藏楼层不带、提示词正则生效）
+  const g7 = await page.evaluate(async () => {
+    const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
+    const s = await import(base + 'store.js');
+    const f = await import(base + 'follow.js');
+    const c = s.state.combos.find(x => x.id === 'c_store');
+    await s.setSetting({ defaultRounds: 1 });
+    const r1 = f.resolveCombo(c).context.rounds;
+    await s.setSetting({ defaultRounds: 12 });
+    return { follows: c.context === null, r1, newOne: s.state.combos.find(x => x.name === '目击帖测试')?.context };
+  });
+  ok(g7.follows && g7.r1 === 1 && g7.newOne === null, '跟随全局的小剧场随全局设置变');
+  const leak = await page.evaluate(async () => {
+    const c = SillyTavern.getContext();
+    const h = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/host.js');
+    const first = c.chat.find(m => !m.is_user && !m.is_system);
+    const keep = first.mes;
+    first.mes += '\n【秘密】正则该清掉这句';
+    const hid = c.chat.find(m => m.is_user && !m.is_system);
+    hid.is_system = true;
+    const before = (await h.buildMaterials({ context: { chat: 'recent', rounds: 12, worldInfo: false, summary: false } })).text;
+    c.extensionSettings.regex = [...(c.extensionSettings.regex || []), { id: 'xjc-test', scriptName: '小剧场测试', findRegex: '/【秘密】[^\\n]*/g', replaceString: '', trimStrings: [], placement: [1, 2], disabled: false, markdownOnly: false, promptOnly: true, runOnEdit: false, substituteRegex: 0, minDepth: null, maxDepth: null }];
+    const after = (await h.buildMaterials({ context: { chat: 'recent', rounds: 12, worldInfo: false, summary: false } })).text;
+    c.extensionSettings.regex = c.extensionSettings.regex.filter(x => x.id !== 'xjc-test');
+    first.mes = keep; hid.is_system = false;
+    return { before: before.includes('【秘密】'), after: after.includes('【秘密】'), hidden: after.includes(hid.mes) };
+  });
+  ok(leak.before && !leak.after, `上下文套用酒馆的提示词正则（套之前有：${leak.before}，套之后有：${leak.after}）`);
+  ok(!leak.hidden, '隐藏的楼层不进上下文');
+
   // 8. 自动出（概率 100）
   await page.evaluate(async () => {
     const m = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
@@ -426,7 +462,7 @@ async function desktop(browser) {
     const c = s.state.combos.find(x => x.name === 'Float 组合');
     return { n, ctx: c && c.context, hasRaw: c && ('rawChannel' in c), linked: c && s.state.prompts.some(p => p.id === c.promptIds[0] && p.title === 'Float 来的') };
   });
-  ok(imported.n === 2 && imported.ctx?.chat === 'recent' && imported.ctx?.rounds === 6 && !imported.hasRaw && imported.linked, 'Float 整包导入并换算字段');
+  ok(imported.n === 2 && imported.ctx === null && !imported.hasRaw && imported.linked, 'Float 整包导入并换算字段（「跟宿主记忆」→ 跟随全局）');
 
   ok(errors.length === 0, `没有页面错误${errors.length ? '：' + errors.join(' | ') : ''}`);
   await ctx.close();

@@ -4,6 +4,7 @@ import { expandMacros, shuffle } from './macros.js';
 import { state } from './store.js';
 import { MOBILE_HTML_RULES, LENGTH_CHARS, LENGTH_LABEL } from './defaults.js';
 import { buildMaterials, callModel, callQuiet, writeBackToLore, resolveTarget, userName } from './host.js';
+import { resolveCombo } from './follow.js';
 
 const STYLE_HINT = {
   free: '',
@@ -13,7 +14,8 @@ const STYLE_HINT = {
 
 // 组合快照带上可重放的依赖；之后改库、删条目，收藏「按这套再来」仍是当时的要求。随机池保留候选，重放时重新抽
 export function captureCombo(combo) {
-  const copy = clone(combo);
+  // 「跟随全局」的项在这一刻换成具体值，之后「按这套再来」也照这一次的来
+  const copy = clone(resolveCombo(combo));
   if (!copy._dependencies) {
     copy._dependencies = clone({
       preamble: byId(state.preambles, combo.preambleId) || state.preambles[0] || null,
@@ -202,9 +204,8 @@ export function aiPickCombo() {
     id: '', name: 'AI 自选', tags: ['随机'], preambleId: state.settings.defaultPreambleId || (state.preambles[0] || {}).id,
     promptIds: [], _virtualPrompts: [picker],
     random: { count: 1, include: [], exclude: [] },
-    output: { mode: 'mixed', wrapTag: '', length: 'default', customChars: 900, style: state.settings.defaultStyle || 'free', staged: false },
-    context: { chat: 'recent', rounds: 12, worldInfo: true, summary: true },
-    who: 'persona', whoText: '', api: '', weight: 1,
+    output: { mode: 'mixed', wrapTag: '', length: 'default', customChars: 900, style: '', staged: false },
+    context: null, who: '', channel: '', writeBack: null, whoText: '', api: '', weight: 1,
   };
 }
 export function weightedRandomCombo() {

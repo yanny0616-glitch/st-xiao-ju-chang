@@ -25,6 +25,8 @@
     background: rgba(0, 0, 0, .45);
 }
 .xjc-root[hidden], .xjc-viewer[hidden] { display: none !important; }
+/* 面板里带 hidden 的一律不显示（.xjc-field 等的 display 会盖掉浏览器默认的 hidden） */
+.xjc-root [hidden], .xjc-viewer [hidden], .xjc-tail [hidden] { display: none !important; }
 .xjc-panel {
     position: relative;
     width: min(920px, 96vw); height: min(900px, 92vh); height: min(900px, 92dvh);
@@ -107,8 +109,21 @@
 /* 输入框字号跟界面字号走；酒馆和 TauriTavern 的 viewport 都是 maximum-scale=1，iOS 点进去不会放大页面 */
 .xjc-root textarea { resize: vertical; line-height: 1.5; min-height: 80px; }
 .xjc-root select option { background: var(--xjc-ui-bg); color: var(--xjc-ui-ink); }
+/* 酒馆给所有复选框画了一个勾（input[type=checkbox]::before）和外框，小剧场的开关和勾选框不要它 */
+.xjc-root input[type=checkbox]::before, .xjc-root input[type=checkbox]::after { content: none !important; display: none !important; }
+.xjc-root input[type=checkbox] { outline: none !important; box-shadow: none !important; overflow: visible; }
+.xjc-check input[type=checkbox] {
+    -webkit-appearance: none; appearance: none; position: relative; cursor: pointer;
+    width: 18px; height: 18px; margin: 2px 0 0; border-radius: 4px;
+    border: 1.5px solid var(--xjc-ui-line) !important; background: var(--xjc-ui-chat) !important;
+}
+.xjc-check input[type=checkbox]:checked {
+    border-color: var(--xjc-ui-acc) !important; background-color: var(--xjc-ui-acc) !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+    background-size: 14px 14px !important; background-position: center !important; background-repeat: no-repeat !important;
+}
 .xjc-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; margin: 0 0 12px; }
-.xjc-toggle input {
+.xjc-toggle input[type=checkbox] {
     -webkit-appearance: none; appearance: none; flex: none; margin: 0; cursor: pointer;
     width: 36px; height: 20px; border-radius: 99px; border: 0;
     background-color: var(--xjc-ui-line);
@@ -116,7 +131,7 @@
     background-size: 14px 14px; background-repeat: no-repeat; background-position: 3px 50%;
     transition: background-position .15s, background-color .15s;
 }
-.xjc-toggle input:checked { background-color: var(--xjc-ui-acc); background-position: calc(100% - 3px) 50%; }
+.xjc-toggle input[type=checkbox]:checked { background-color: var(--xjc-ui-acc); background-position: calc(100% - 3px) 50%; }
 .xjc-toggle span { font-size: .92em; }
 .xjc-seg { display: inline-flex; border: 1px solid var(--xjc-ui-line); border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
 .xjc-seg button { border: 0; background: transparent; color: inherit; padding: 6px 12px; font: inherit; font-size: .88em; cursor: pointer; opacity: .7; }

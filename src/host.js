@@ -23,18 +23,40 @@ function sub(text, charName) {
 function cleanMes(m) {
   return String(m.mes || '').replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').trim();
 }
-/** 截至 uptoIndex（含）的最近 rounds 轮，跳过系统消息和隐藏消息 */
-export function recentChat(rounds, uptoIndex) {
+let regexMod;
+async function regexEngine() {
+  if (regexMod === undefined) {
+    try { regexMod = await import('/scripts/extensions/regex/engine.js'); } catch { regexMod = null; }
+  }
+  return regexMod;
+}
+/**
+ * 截至 end（不含）的聊天，和酒馆发给模型时一样处理：跳过隐藏（/hide）和系统消息，
+ * 套用「修改提示词」类的正则（按离末尾的深度，min/max depth 照算），被正则清掉的楼层不算
+ */
+async function promptChat(end) {
+  const chat = ctx().chat || [];
+  const vis = [];
+  for (let i = 0; i < end; i++) { const m = chat[i]; if (m && !m.is_system && m.mes) vis.push(i); }
+  const rx = await regexEngine();
+  const out = [];
+  vis.forEach((i, k) => {
+    const m = chat[i];
+    let raw = String(m.mes || '');
+    if (rx?.getRegexedString && rx.regex_placement) {
+      try { raw = rx.getRegexedString(raw, m.is_user ? rx.regex_placement.USER_INPUT : rx.regex_placement.AI_OUTPUT, { isPrompt: true, depth: vis.length - k - 1 }); } catch { /* ignore */ }
+    }
+    const text = cleanMes({ mes: raw }).slice(0, 4000);
+    if (text) out.push({ idx: i, isUser: !!m.is_user, role: m.is_user ? 'user' : 'assistant', name: m.name, text });
+  });
+  return out;
+}
+/** 截至 uptoIndex（含）的最近 rounds 轮 */
+export async function recentChat(rounds, uptoIndex) {
   const chat = ctx().chat || [];
   const end = uptoIndex == null ? chat.length : Math.min(chat.length, uptoIndex + 1);
   const want = Math.max(1, Math.min(100, Number(rounds) || 12)) * 2;
-  const out = [];
-  for (let i = end - 1; i >= 0 && out.length < want; i--) {
-    const m = chat[i];
-    if (!m || m.is_system || !m.mes) continue;
-    out.unshift({ role: m.is_user ? 'user' : 'assistant', name: m.name, text: cleanMes(m).slice(0, 4000) });
-  }
-  return out;
+  return (await promptChat(end)).slice(-want);
 }
 
 /** 拼一段 system 材料。opts: { context, who, uptoIndex } */
@@ -58,12 +80,16 @@ export async function buildMaterials({ context = {}, who = 'persona', uptoIndex 
     if (persona && persona.trim()) parts.push(`<UserPersona name="${userName()}">\n${sub(persona, name)}\n</UserPersona>`);
   }
 
-  const history = context.chat === 'recent' ? recentChat(context.rounds, uptoIndex) : [];
+  const end = uptoIndex == null ? (c.chat || []).length : Math.min((c.chat || []).length, uptoIndex + 1);
+  const all = await promptChat(end);
+  const want = Math.max(1, Math.min(100, Number(context.rounds) || 12)) * 2;
+  const history = context.chat === 'recent' ? all.slice(-want) : [];
 
   if (context.worldInfo !== false && typeof c.getWorldInfoPrompt === 'function') {
     try {
-      // 世界书扫描要的是「新的在前」的消息文本，和酒馆自己生成时一致；dry run 不触发激活事件
-      const scan = (history.length ? history : recentChat(4, uptoIndex)).map(m => `${m.name}: ${m.text}`).reverse();
+      // 和酒馆自己生成时一样：截到这一楼、正则处理过的聊天，「新的在前」交给酒馆扫描，
+      // 扫描深度、绿灯关键词、蓝灯常驻都按酒馆的世界书设置（数据库插件的召回编码也就照常生效）；dry run 不触发激活事件
+      const scan = all.map(m => `${m.name}: ${m.text}`).reverse();
       const wi = await c.getWorldInfoPrompt(scan, c.maxContext || 8192, true);
       const text = [wi?.worldInfoBefore, wi?.worldInfoAfter].filter(s => s && s.trim()).join('\n');
       if (text) parts.push(`<WorldInfo>\n${sub(text.trim(), name)}\n</WorldInfo>`);

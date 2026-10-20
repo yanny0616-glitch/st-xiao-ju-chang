@@ -32,10 +32,11 @@ const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ?
 
 /** Float 小剧场的组合：记忆三选一换成聊天上下文；写回记忆改成写进聊天的世界书；纯裸通道就是本插件默认的「自己拼」 */
 function normalizeCombo(c) {
+  // 上下文 / 身份 / 通道 / 写回 / HTML 风格 / 分两步：空着 = 跟随全局。Float 的「跟宿主记忆」也当跟随全局
   const mem = c.memory || {};
-  const context = c.context && typeof c.context === 'object' ? c.context : {
-    chat: mem.mode === 'none' ? 'none' : 'recent', rounds: mem.rounds || 12, worldInfo: true, summary: mem.mode !== 'none',
-  };
+  const context = c.context && typeof c.context === 'object' ? c.context
+    : mem.mode === 'none' ? { chat: 'none', rounds: 12, worldInfo: true, summary: false }
+    : mem.mode === 'recent' ? { chat: 'recent', rounds: mem.rounds || 12, worldInfo: true, summary: true } : null;
   const o = c.output || {};
   return {
     id: str(c.id, 80), name: str(c.name, 60) || '未命名', tags: tags(c.tags),
@@ -44,11 +45,11 @@ function normalizeCombo(c) {
     output: {
       mode: ['text', 'html', 'mixed'].includes(o.mode) ? o.mode : 'text', wrapTag: /^[a-zA-Z][\w-]{0,30}$/.test(o.wrapTag || '') ? o.wrapTag : '',
       length: ['default', 'short', 'medium', 'long', 'custom'].includes(o.length) ? o.length : 'default', customChars: num(o.customChars, 900, 50, 20000),
-      style: ['free', 'vars', 'strict'].includes(o.style) ? o.style : 'free', staged: !!o.staged,
+      style: ['free', 'vars', 'strict'].includes(o.style) ? o.style : '', staged: typeof o.staged === 'boolean' ? o.staged : null,
     },
-    context: { chat: context.chat === 'none' ? 'none' : 'recent', rounds: num(context.rounds, 12, 1, 100), worldInfo: context.worldInfo !== false, summary: context.summary !== false },
-    who: c.who === 'observer' ? 'none' : ['persona', 'custom', 'none'].includes(c.who) ? c.who : 'persona', whoText: str(c.whoText, 2000),
-    channel: c.channel === 'preset' ? 'preset' : 'own', writeBack: !!c.writeBack,
+    context: context ? { chat: context.chat === 'none' ? 'none' : 'recent', rounds: num(context.rounds, 12, 1, 100), worldInfo: context.worldInfo !== false, summary: context.summary !== false } : null,
+    who: c.who === 'observer' ? 'none' : ['persona', 'custom', 'none'].includes(c.who) ? c.who : '', whoText: str(c.whoText, 2000),
+    channel: ['own', 'preset'].includes(c.channel) ? c.channel : '', writeBack: typeof c.writeBack === 'boolean' ? c.writeBack : null,
     plays: num(c.plays && typeof c.plays === 'object' ? Object.values(c.plays).reduce((a, x) => a + (Number(x) || 0), 0) : c.plays ?? c.useCount, 0, 0, 1e9), lastUsedAt: str(c.lastUsedAt, 40),
     api: typeof c.api === 'string' ? c.api : '', weight: num(c.weight, 1, 0, 100),
   };

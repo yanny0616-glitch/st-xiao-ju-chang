@@ -7,6 +7,7 @@ import {
   generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, segmentsOf, kindOf, KIND_LABEL, charCount,
   resultPlainText, contextLabel, postProcess,
 } from './gen.js';
+import { resolveCombo, globalContext, globalWho, globalChannel, globalStyle, globalStaged, globalWriteBack, WHO_LABEL, CHANNEL_LABEL, STYLE_LABEL } from './follow.js';
 import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
@@ -151,7 +152,8 @@ function renderNotice() {
   box.appendChild(card);
 }
 
-function comboChips(c) {
+function comboChips(raw) {
+  const c = resolveCombo(raw);
   const chips = el('div', 'xjc-chips');
   const chip = (k, v) => { const s = el('span', 'xjc-chip'); s.style.cursor = 'default'; s.appendChild(el('b', '', k)); s.appendChild(document.createTextNode(v)); chips.appendChild(s); };
   const titles = (c.promptIds || []).map(id => (byId(state.prompts, id) || {}).title).filter(Boolean);
@@ -464,7 +466,8 @@ function libCombos(box) {
   for (const c of state.combos) {
     const n = (c.promptIds || []).length;
     const cur = c.id === state.settings.currentComboId;
-    list.appendChild(itemRow(`${c.name}${cur ? ' · 当前' : ''}`, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${c.channel === 'preset' ? '走酒馆预设' : contextLabel(c.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`));
+    const rc = resolveCombo(c);
+    list.appendChild(itemRow(`${c.name}${cur ? ' · 当前' : ''}`, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${rc.channel === 'preset' ? '走酒馆预设' : contextLabel(rc.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`));
   }
   box.appendChild(list);
 }
@@ -600,17 +603,19 @@ function newCombo() {
   return {
     id: '', name: '', tags: [], preambleId: s.defaultPreambleId || state.preambles[0]?.id || '', promptIds: [],
     random: { count: 0, include: [], exclude: [] },
-    output: { mode: 'text', wrapTag: '', length: 'default', customChars: 900, style: s.defaultStyle || 'free', staged: !!s.stagedDefault },
-    context: { chat: s.defaultChat === 'none' ? 'none' : 'recent', rounds: Number(s.defaultRounds) || 12, worldInfo: s.defaultWorldInfo !== false, summary: s.defaultSummary !== false },
-    who: s.defaultWho || 'persona', whoText: '', api: '', weight: 1, channel: s.defaultChannel === 'preset' ? 'preset' : 'own', writeBack: !!s.writeBackDefault,
+    // 新建的小剧场全部「跟随全局」，想单独改再在编辑里选
+    output: { mode: 'text', wrapTag: '', length: 'default', customChars: 900, style: '', staged: null },
+    context: null, who: '', whoText: '', api: '', weight: 1, channel: '', writeBack: null,
   };
 }
 
 function editCombo(row) {
   const d = clone(row || newCombo());
   d.output = { ...newCombo().output, ...d.output };
-  d.context = { ...newCombo().context, ...d.context };
   d.random = { ...newCombo().random, ...d.random };
+  // 自定上下文时的起点：已有自定值就用它，否则从当前全局值开始改
+  const ctxDraft = { ...globalContext(), ...(d.context || {}) };
+  const follow = now => `跟随全局（${now}）`;
   openSheet(row ? `编辑「${row.name}」` : '新建小剧场', (body, foot, closeIt) => {
     const name = input(d.name, '比如：深夜便利店偶遇');
     body.appendChild(field('名字', name));
@@ -654,54 +659,72 @@ function editCombo(row) {
       }
       return box;
     };
-    body.append(field('随机池', rc, `池里共 ${state.randoms.length} 条`), field('只抽', tagPick('include'), '点选标签；都不选 = 全池'), field('排除', tagPick('exclude'), '带这些标签的不抽'));
+    const incF = field('只抽', tagPick('include'), '点选标签；都不选 = 全池');
+    const excF = field('排除', tagPick('exclude'), '带这些标签的不抽');
+    const syncRandom = () => { incF.hidden = excF.hidden = rc.value === '0'; };
+    rc.addEventListener('change', syncRandom);
+    body.append(field('随机池', rc, `池里共 ${state.randoms.length} 条`), incF, excF);
+    syncRandom();
 
     body.appendChild(el('div', 'xjc-sec', '输出'));
-    const stagedT = toggle('分两步出：先出页面骨架立刻显示，再按占位填字（适合大页面）', d.output.staged);
-    const syncStaged = () => { stagedT.hidden = d.output.mode !== 'html'; };
-    body.appendChild(field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], d.output.mode, v => { d.output.mode = v; syncStaged(); })));
+    const stagedV = typeof d.output.staged === 'boolean' ? (d.output.staged ? 'on' : 'off') : '';
+    const stagedT = field('分两步出', seg([{ v: '', l: follow(globalStaged() ? '分两步' : '一次出') }, { v: 'on', l: '分两步' }, { v: 'off', l: '一次出' }], stagedV, v => { d.output.staged = v === '' ? null : v === 'on'; }), '先出页面骨架立刻显示，再按占位填字，适合大页面。');
+    let syncHtml = () => {};
+    body.appendChild(field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], d.output.mode, v => { d.output.mode = v; syncHtml(); })));
     body.appendChild(stagedT);
-    syncStaged();
-    const lenSel = select(['default', 'short', 'medium', 'long', 'custom'].map(k => ({ v: k, l: k === 'default' ? '跟设置' : `${LENGTH_LABEL[k]}${k === 'custom' ? '' : ` · 约 ${{ short: 400, medium: 900, long: 1800 }[k]} 字`}` })), d.output.length);
-    const custom = input(d.output.customChars, '字数', 'number');
-    const customF = field('自定字数', custom);
+    const lenSel = select(['default', 'short', 'medium', 'long', 'custom'].map(k => ({ v: k, l: k === 'default' ? `跟随全局（${state.settings.lengthLimit ? LENGTH_LABEL[state.settings.defaultLength || 'medium'] : '不限'}）` : `${LENGTH_LABEL[k]}${k === 'custom' ? '' : ` · 约 ${{ short: 400, medium: 900, long: 1800 }[k]} 字`}` })), d.output.length);
+    const customChars = input(d.output.customChars, '字数', 'number');
+    const customF = field('自定字数', customChars);
     const syncLen = () => { customF.hidden = lenSel.value !== 'custom'; };
     lenSel.onchange = syncLen;
     const g = el('div', 'xjc-grid2');
     g.append(field('篇幅', lenSel), customF);
     body.appendChild(g);
     syncLen();
-    const styleSel = select([{ v: 'free', l: '不约束' }, { v: 'vars', l: '给主题变量' }, { v: 'strict', l: '严格只用主题色' }], d.output.style);
+    const styleSel = select([{ v: '', l: `跟随全局（${STYLE_LABEL[globalStyle()]}）` }, ...Object.entries(STYLE_LABEL).map(([v, l]) => ({ v, l }))], d.output.style || '');
+    const styleF = field('HTML 风格', styleSel);
     const wrap = input(d.output.wrapTag, '比如 theater（空 = 不包）');
     const g2 = el('div', 'xjc-grid2');
-    g2.append(field('HTML 风格', styleSel), field('标签包裹', wrap));
+    g2.append(styleF, field('标签包裹', wrap));
     body.appendChild(g2);
+    // 纯文字用不到 HTML 风格；分两步只对 HTML
+    syncHtml = () => { stagedT.hidden = d.output.mode !== 'html'; styleF.hidden = d.output.mode === 'text'; };
+    syncHtml();
 
     body.appendChild(el('div', 'xjc-sec', '上下文'));
     const ctxBox = el('div');
-    body.appendChild(field('通道', seg([{ v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], d.channel === 'preset' ? 'preset' : 'own', v => { d.channel = v; ctxBox.hidden = v === 'preset'; }),
-      '自己拼：只带下面勾的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），只对「跟随酒馆当前 API」有效，不能边写边显示。'));
+    const syncChannel = () => { ctxBox.hidden = (d.channel || globalChannel()) === 'preset'; };
+    body.appendChild(field('通道', seg([{ v: '', l: follow(CHANNEL_LABEL[globalChannel()]) }, { v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], d.channel || '', v => { d.channel = v; syncChannel(); }),
+      '自己拼：只带下面的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），只对「跟随酒馆当前 API」有效，不能边写边显示。'));
     body.appendChild(ctxBox);
-    ctxBox.hidden = d.channel === 'preset';
-    const ctxPush = (...nodes) => ctxBox.append(...nodes);
-    const rounds = input(d.context.rounds, '', 'number');
+    // 材料：默认跟随全局，选「自定」才展开具体选项
+    const custom = el('div');
+    const gctx = globalContext();
+    const gText = `${gctx.chat === 'recent' ? `最近 ${gctx.rounds} 轮` : '不带聊天'}${gctx.worldInfo ? ' · 世界书' : ''}${gctx.summary ? ' · 总结' : ''}`;
+    const followHint = el('p', 'xjc-hint', `全局现在是：${gText}。在「设置 → 生成」里改，所有跟随全局的小剧场一起变。`);
+    ctxBox.appendChild(field('材料', seg([{ v: 'global', l: '跟随全局' }, { v: 'custom', l: '自定' }], d.context ? 'custom' : 'global', v => { d.context = v === 'custom' ? ctxDraft : null; custom.hidden = v !== 'custom'; followHint.hidden = v === 'custom'; })));
+    ctxBox.append(followHint, custom);
+    custom.hidden = !d.context;
+    followHint.hidden = !!d.context;
+    const rounds = input(ctxDraft.rounds, '', 'number');
     const roundsF = field('带几轮', rounds, '一轮 = 你一句 + TA 一句');
-    ctxPush(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], d.context.chat, v => { d.context.chat = v; roundsF.hidden = v !== 'recent'; })));
-    ctxPush(roundsF);
-    roundsF.hidden = d.context.chat !== 'recent';
-    const wi = toggle('带世界书（按聊天内容激活，和酒馆一样）', d.context.worldInfo);
-    const sm = toggle('带剧情总结（酒馆「总结」扩展的内容）', d.context.summary);
-    ctxPush(wi, sm);
-    const wb = toggle('写回记忆：生成后把梗概写成一条世界书条目，放进这个聊天绑定的世界书（没有就新建一本）', d.writeBack);
-    if (S().writeBackFeature) body.appendChild(wb);
+    custom.appendChild(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], ctxDraft.chat, v => { ctxDraft.chat = v; roundsF.hidden = v !== 'recent'; })));
+    custom.appendChild(roundsF);
+    roundsF.hidden = ctxDraft.chat !== 'recent';
+    const wi = toggle('带世界书（和酒馆一样按聊天内容激活）', ctxDraft.worldInfo);
+    const sm = toggle('带剧情总结（酒馆「总结」扩展的内容）', ctxDraft.summary);
+    custom.append(wi, sm);
+    syncChannel();
+    const wbV = typeof d.writeBack === 'boolean' ? (d.writeBack ? 'on' : 'off') : '';
+    if (S().writeBackFeature) body.appendChild(field('写回记忆', seg([{ v: '', l: follow(globalWriteBack() ? '写回' : '不写') }, { v: 'on', l: '写回' }, { v: 'off', l: '不写' }], wbV, v => { d.writeBack = v === '' ? null : v === 'on'; }), '生成后把梗概写成一条世界书条目，放进这个聊天绑定的世界书。'));
     const whoText = input(d.whoText, '比如：TA 的新同事');
     const whoF = field('自定身份', whoText);
-    body.appendChild(field('我在戏里是谁', seg([{ v: 'persona', l: '我的人设' }, { v: 'custom', l: '自定身份' }, { v: 'none', l: '旁观' }], d.who, v => { d.who = v; whoF.hidden = v !== 'custom'; })));
+    body.appendChild(field('我在戏里是谁', seg([{ v: '', l: follow(WHO_LABEL[globalWho()]) }, { v: 'persona', l: '我的人设' }, { v: 'custom', l: '自定身份' }, { v: 'none', l: '旁观' }], d.who || '', v => { d.who = v; whoF.hidden = (v || globalWho()) !== 'custom'; })));
     body.appendChild(whoF);
-    whoF.hidden = d.who !== 'custom';
+    whoF.hidden = (d.who || globalWho()) !== 'custom';
 
     body.appendChild(el('div', 'xjc-sec', '其他'));
-    const api = select([{ v: '', l: `跟设置（${targetLabel(state.settings.api)}）` }, ...apiTargets()], d.api || '');
+    const api = select([{ v: '', l: `跟随全局（${targetLabel(state.settings.api)}）` }, ...apiTargets()], d.api || '');
     const weight = input(d.weight ?? 1, '', 'number');
     const g3 = el('div', 'xjc-grid2');
     g3.append(field('出口', api), field('随机权重', weight, '「随机」按权重抽，0 = 不参与'));
@@ -710,10 +733,10 @@ function editCombo(row) {
     const collect = () => ({
       ...d, id: d.id || uid('c'), name: name.value.trim() || '未命名小剧场', tags: textToTags(tg.value), preambleId: pre.value,
       random: { count: Number(rc.value) || 0, include: [...(d.random.include || [])], exclude: [...(d.random.exclude || [])] },
-      output: { ...d.output, length: lenSel.value, customChars: Math.max(50, Number(custom.value) || 900), style: styleSel.value, wrapTag: wrap.value.trim().replace(/[^\w-]/g, ''), staged: stagedT.input.checked },
-      context: { ...d.context, rounds: Math.max(1, Math.min(100, Number(rounds.value) || 12)), worldInfo: wi.input.checked, summary: sm.input.checked },
+      output: { ...d.output, length: lenSel.value, customChars: Math.max(50, Number(customChars.value) || 900), style: styleSel.value, wrapTag: wrap.value.trim().replace(/[^\w-]/g, '') },
+      context: d.context ? { ...ctxDraft, rounds: Math.max(1, Math.min(100, Number(rounds.value) || 12)), worldInfo: wi.input.checked, summary: sm.input.checked } : null,
       whoText: whoText.value.trim(), api: api.value, weight: Math.max(0, Number(weight.value) || 0),
-      channel: d.channel === 'preset' ? 'preset' : 'own', writeBack: wb.input.checked,
+      channel: d.channel || '', writeBack: d.writeBack ?? null,
     });
     if (row) {
       foot.appendChild(btn('删除', async () => {
@@ -958,25 +981,30 @@ function setGen(box) {
   mt.onchange = () => setSetting({ maxTokens: Math.max(256, Number(mt.value) || 4096) });
   box.appendChild(field('最大输出长度（token）', mt, '用于跟随酒馆和连接配置。HTML 小剧场很吃长度，建议 4000 以上。自配 API 在各自配置里设。'));
   box.appendChild(toggle('边写边显示', S().streamPreview !== false, v => setSetting({ streamPreview: v })));
-  box.appendChild(toggle('篇幅限制', S().lengthLimit, v => setSetting({ lengthLimit: v })));
-  box.appendChild(field('默认篇幅', seg(['short', 'medium', 'long'].map(k => ({ v: k, l: LENGTH_LABEL[k] })), S().defaultLength, v => setSetting({ defaultLength: v }))));
   box.appendChild(toggle('「随机」里也可能抽到 AI 自选', S().randomIncludesAi, v => setSetting({ randomIncludesAi: v })));
-  const style = select([{ v: 'free', l: '不约束' }, { v: 'vars', l: '给主题变量' }, { v: 'strict', l: '严格只用主题色' }], S().defaultStyle);
-  style.onchange = () => setSetting({ defaultStyle: style.value });
-  box.appendChild(field('新建小剧场的 HTML 风格', style));
-  box.appendChild(toggle('新建小剧场默认「分两步出」', S().stagedDefault, v => setSetting({ stagedDefault: v })));
-  box.appendChild(el('div', 'xjc-sec', '新建小剧场的默认值'));
-  const roundsIn = input(S().defaultRounds, '', 'number');
+
+  // 全局值：小剧场里选「跟随全局」（新建的默认就是）时用这些；小剧场里选了自定的不受影响
+  box.appendChild(el('div', 'xjc-sec', '全局默认'));
+  box.appendChild(el('p', 'xjc-hint', '小剧场里选「跟随全局」时用这里的设置，新建的小剧场默认全部跟随。想让某个小剧场不一样，就在它的编辑页里选具体的值。'));
+  const lenF = field('篇幅', seg(['short', 'medium', 'long'].map(k => ({ v: k, l: LENGTH_LABEL[k] })), S().defaultLength, v => setSetting({ defaultLength: v })));
+  box.appendChild(toggle('限制篇幅', S().lengthLimit, v => { setSetting({ lengthLimit: v }); lenF.hidden = !v; }));
+  box.appendChild(lenF);
+  lenF.hidden = !S().lengthLimit;
+  box.appendChild(field('我在戏里是谁', seg(Object.entries(WHO_LABEL).map(([v, l]) => ({ v, l })), globalWho(), v => setSetting({ defaultWho: v })), '选「自定身份」的话，具体身份要在各个小剧场里写。'));
+  box.appendChild(field('通道', seg(Object.entries(CHANNEL_LABEL).map(([v, l]) => ({ v, l })), globalChannel(), v => setSetting({ defaultChannel: v }))));
+  const roundsIn = input(S().defaultRounds || 12, '', 'number');
   roundsIn.onchange = () => setSetting({ defaultRounds: Math.max(1, Math.min(100, Number(roundsIn.value) || 12)) });
-  const roundsF = field('带几轮', roundsIn);
-  box.appendChild(field('我在戏里是谁', seg([{ v: 'persona', l: '我的人设' }, { v: 'custom', l: '自定身份' }, { v: 'none', l: '旁观' }], S().defaultWho || 'persona', v => setSetting({ defaultWho: v }))));
-  box.appendChild(field('通道', seg([{ v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], S().defaultChannel || 'own', v => setSetting({ defaultChannel: v }))));
+  const roundsF = field('带几轮', roundsIn, '一轮 = 你一句 + TA 一句');
   box.appendChild(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], S().defaultChat || 'recent', v => { setSetting({ defaultChat: v }); roundsF.hidden = v !== 'recent'; })));
   box.appendChild(roundsF);
   roundsF.hidden = (S().defaultChat || 'recent') !== 'recent';
-  box.appendChild(toggle('带世界书', S().defaultWorldInfo !== false, v => setSetting({ defaultWorldInfo: v })));
+  box.appendChild(toggle('带世界书（和酒馆一样按聊天内容激活）', S().defaultWorldInfo !== false, v => setSetting({ defaultWorldInfo: v })));
   box.appendChild(toggle('带剧情总结', S().defaultSummary !== false, v => setSetting({ defaultSummary: v })));
-  if (S().writeBackFeature) box.appendChild(toggle('写回记忆（写进聊天的世界书）', !!S().writeBackDefault, v => setSetting({ writeBackDefault: v })));
+  const style = select(Object.entries(STYLE_LABEL).map(([v, l]) => ({ v, l })), globalStyle());
+  style.onchange = () => setSetting({ defaultStyle: style.value });
+  box.appendChild(field('HTML 风格', style));
+  box.appendChild(toggle('HTML 小剧场分两步出', globalStaged(), v => setSetting({ stagedDefault: v })));
+  if (S().writeBackFeature) box.appendChild(toggle('写回记忆（写进聊天的世界书）', globalWriteBack(), v => setSetting({ writeBackDefault: v })));
   box.appendChild(el('div', 'xjc-sec', '可选功能'));
   box.appendChild(toggle('写回记忆：小剧场里多一个开关，开了的那篇生成后把梗概写进这个聊天绑定的世界书，之后聊天时模型会记得（默认关）', !!S().writeBackFeature, v => { setSetting({ writeBackFeature: v }); renderSettings(); }));
   box.appendChild(el('div', 'xjc-sec', '最近'));
@@ -1097,15 +1125,19 @@ function setChat(box) {
   more.hidden = !t.enabled;
   box = more;
   box.appendChild(toggle('消息的「…」菜单里加面具按钮（点一下为这条出一篇）', t.button, v => { put({ button: v }); document.dispatchEvent(new CustomEvent('xjc-settings')); }));
-  box.appendChild(toggle('AI 回复后自动出一篇', t.auto, v => put({ auto: v })));
+  // 自动出关着时，概率和出哪种都用不到，收起来
+  const autoBox = el('div');
+  box.appendChild(toggle('AI 回复后自动出一篇', t.auto, v => { put({ auto: v }); autoBox.hidden = !v; }));
+  box.appendChild(autoBox);
+  autoBox.hidden = !t.auto;
   const chance = input(t.chance, '', 'number');
   chance.onchange = () => put({ chance: Math.max(1, Math.min(100, Number(chance.value) || 30)) });
-  box.appendChild(field('自动出的概率（%）', chance, '100 = 每条回复都出。'));
+  autoBox.appendChild(field('自动出的概率（%）', chance, '100 = 每条回复都出。'));
   const comboSel = select(state.combos.map(c => ({ v: c.id, l: c.name })), t.comboId || state.combos[0]?.id);
   comboSel.onchange = () => put({ comboId: comboSel.value });
   const cf = field('用这个小剧场', comboSel);
-  box.appendChild(field('出哪种', seg([{ v: 'random', l: '按权重随机' }, { v: 'ai', l: 'AI 自选' }, { v: 'combo', l: '固定一个' }], t.pick, v => { put({ pick: v, comboId: comboSel.value }); cf.hidden = v !== 'combo'; })));
-  box.appendChild(cf);
+  autoBox.appendChild(field('出哪种', seg([{ v: 'random', l: '按权重随机' }, { v: 'ai', l: 'AI 自选' }, { v: 'combo', l: '固定一个' }], t.pick, v => { put({ pick: v, comboId: comboSel.value }); cf.hidden = v !== 'combo'; })));
+  autoBox.appendChild(cf);
   cf.hidden = t.pick !== 'combo';
   box.appendChild(toggle('默认展开', t.expanded, v => put({ expanded: v })));
 }

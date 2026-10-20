@@ -4,6 +4,7 @@ import { state, load, setSetting } from './src/store.js';
 import * as panel from './src/panel.js';
 import { initChat } from './src/chat.js';
 import { applyTheme } from './src/frame.js';
+import { migrateFollow } from './src/follow.js';
 
 function addWandItem() {
   const menu = document.getElementById('extensionsMenu');
@@ -48,6 +49,7 @@ async function init() {
       try { await (window.__TAURITAVERN__.ready ?? window.__TAURITAVERN_MAIN_READY__); } catch { /* ignore */ }
     }
     await load();
+    await migrateFollow();
     applyTheme();
     addWandItem();
     addSettingsDrawer();
