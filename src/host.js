@@ -9,7 +9,7 @@ export function currentChar() {
   if (c.groupId) return null;
   const chid = c.characterId;
   if (chid === undefined || chid === null || chid === '' || !c.characters[chid]) return null;
-  return { chid: Number(chid), name: c.characters[chid].name };
+  return { chid: Number(chid), name: c.characters[chid].name, avatar: c.characters[chid].avatar || '' };
 }
 export const userName = () => ctx().name1 || '用户';
 

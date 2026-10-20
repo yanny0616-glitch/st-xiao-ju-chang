@@ -7,7 +7,7 @@ import { mountFrame, markTheme } from './frame.js';
 import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
 import { instr } from './instr.js';
-import { isFavorite, toggleFavorite } from './favs.js';
+import { isFavorite, toggleFavorite, ownTheaters, pruneForeign } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
 
@@ -28,7 +28,8 @@ async function pushTheater(msg, result) {
     return -1;
   }
   msg.extra = msg.extra || {};
-  msg.extra.xjc = [...(Array.isArray(msg.extra.xjc) ? msg.extra.xjc : []), slim(result)];
+  pruneForeign(msg);
+  msg.extra.xjc = [...(Array.isArray(msg.extra.xjc) ? msg.extra.xjc : []), { ...slim(result), swipe: Number(msg.swipe_id) || 0 }];
   await c.saveChat();
   renderTail(idx);
   return idx;
@@ -161,7 +162,8 @@ export function renderTail(mesId) {
   const node = mesEl(mesId);
   if (!node) return;
   const m = ctx().chat[mesId];
-  const list = (m?.extra?.xjc || []).filter(t => t && t.id);
+  if (m && pruneForeign(m)) { const c = ctx(); (c.saveChatDebounced || c.saveChat)?.call(c); }
+  const list = ownTheaters(m);
   const job = m && running.get(m);
   let box = node.querySelector('.xjc-tail');
   if (!list.length && !job) { box?.remove(); return; }
@@ -191,7 +193,7 @@ export function renderAll() {
   const chat = ctx().chat || [];
   document.querySelectorAll('#chat .mes[mesid]').forEach(node => {
     const id = Number(node.getAttribute('mesid'));
-    if (chat[id]?.extra?.xjc?.length || node.querySelector('.xjc-tail')) renderTail(id);
+    if (ownTheaters(chat[id]).length || node.querySelector('.xjc-tail')) renderTail(id);
   });
 }
 
@@ -250,8 +252,10 @@ export function initChat() {
     renderTail(mesId);
     const t = state.settings.tail;
     if (!t.enabled || !t.auto || ['first_message', 'continue', 'impersonate'].includes(type)) return;
+    // 换一个回复 / 重新生成默认不再自动出，免得每滑一次就多花一次调用
+    if (!t.autoOnSwipe && ['swipe', 'regenerate'].includes(type)) return;
     const m = ctx().chat[mesId];
-    if (!m || m.is_user || m.is_system || m.extra?.xjc?.length) return;
+    if (!m || m.is_user || m.is_system || ownTheaters(m).length) return;
     if (Math.random() * 100 >= (Number(t.chance) || 0)) return;
     generateFor(mesId);
   }));

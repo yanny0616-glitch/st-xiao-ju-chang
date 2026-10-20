@@ -17,6 +17,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function boot(page) {
   await page.goto(ST, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.SillyTavern && document.getElementById('xjc_wand'), null, { timeout: 60000 });
+  // 新装的酒馆第一次打开会弹欢迎窗，挡住发送按钮；有就关掉
+  await sleep(800);
+  for (const sel of ['dialog.popup[open] .popup-button-ok', 'dialog.popup[open] .popup-button-close']) {
+    const b = page.locator(sel).first();
+    if (await b.isVisible().catch(() => false)) { await b.click().catch(() => {}); break; }
+  }
 }
 
 async function setupData(page) {
@@ -293,6 +299,39 @@ async function desktop(browser) {
   await page.click('.xjc-ops >> text=♡ 收藏');
   await page.click('.xjc-tabs button[data-v="fav"]');
   ok(await page.locator('.xjc-view[data-view="fav"] .xjc-item').count() === 1, '收藏页有一条');
+  await sleep(800);
+  const files5 = await page.evaluate(async () => {
+    const get = async n => { const r = await fetch(`/user/files/xiao-ju-chang-${n}.json?t=${Date.now()}`, { cache: 'no-store' }); return r.ok ? r.json() : null; };
+    return { fav: await get('favorites'), apis: await get('apis'), bagApis: 'apis' in (SillyTavern.getContext().extensionSettings.xiaoJuChang || {}) };
+  });
+  ok(Array.isArray(files5.fav) && files5.fav.length === 1, '收藏存成酒馆服务器上的用户文件（换设备、换浏览器都在）');
+  ok(Array.isArray(files5.apis) && files5.apis.some(a => a.key === 'sk-test-123') && !files5.bagApis, 'API 配置（含密钥）存在单独的文件里，不在 settings.json');
+  // 最近 / 收藏按角色：默认只看当前角色；收藏多了能搜
+  const scopeT = await page.evaluate(async () => {
+    const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
+    const keepR = s.state.recent, keepF = s.state.favorites;
+    const fake = (i, who) => ({ id: 'r_fake' + i + who, title: `假的${who}${i}`, characterName: who, segments: [{ type: 'text', content: 'x' }], snapshot: { comboName: '假小剧场' } });
+    s.state.recent = [fake(0, '别人'), ...keepR];
+    s.state.favorites = [...keepF, ...[1, 2, 3, 4, 5, 6].map(i => fake(i, '林晚')), fake(7, '别人')];
+    window.XiaoJuChang.open('stage');
+    const rec = document.querySelector('.xjc-stage-recent');
+    const r1 = !rec.textContent.includes('假的别人0') && !!rec.querySelector('.xjc-chip');
+    [...rec.querySelectorAll('.xjc-chip')].find(c => c.textContent.includes('全部角色')).click();
+    const r2 = document.querySelector('.xjc-stage-recent').textContent.includes('假的别人0');
+    await s.setSetting({ recentScope: 'char' });
+    window.XiaoJuChang.open('fav');
+    const favView = document.querySelector('.xjc-view[data-view="fav"]');
+    const f1 = favView.textContent.includes('假的林晚1') && !favView.textContent.includes('假的别人7');
+    const q = favView.querySelector('input[type=search]');
+    q.value = '林晚3'; q.dispatchEvent(new Event('input'));
+    const f2 = favView.querySelectorAll('.xjc-item').length === 1;
+    s.state.recent = keepR; s.state.favorites = keepF;
+    q.value = ''; q.dispatchEvent(new Event('input'));
+    return { r1, r2, f1, f2 };
+  });
+  ok(scopeT.r1 && scopeT.r2, `「最近」默认只看当前角色，可切到全部角色（${JSON.stringify(scopeT)}）`);
+  ok(scopeT.f1 && scopeT.f2, '收藏默认只看当前角色，能搜索');
+  await page.click('.xjc-tabs button[data-v="fav"]');
   await page.click('.xjc-view[data-view="fav"] .xjc-item');
   await page.waitForSelector('.xjc-viewer .xjc-frame');
   await page.screenshot({ path: `${SHOTS}/d-06-viewer.png` });
@@ -519,6 +558,19 @@ async function desktop(browser) {
     return last && last.querySelector('.xjc-tail-card') && !document.querySelector('.xjc-tail-busy');
   }, null, { timeout: 30000 });
   ok(true, 'AI 回复后自动出');
+  // 换一个回复（swipe）默认不自动出
+  const briefs = () => mockCalls().filter(c => JSON.stringify(c.messages).includes('<Brief>')).length;
+  const b0 = briefs();
+  const lastM = page.locator('#chat .mes').last();
+  await lastM.hover();
+  await lastM.locator('.swipe_right').click();
+  await page.waitForFunction(() => { const l = [...document.querySelectorAll('#chat .mes')].pop(); return l && !l.querySelector('.xjc-tail-card') && !l.querySelector('.mes_text:empty'); }, null, { timeout: 30000 });
+  await sleep(2500);
+  ok(briefs() === b0 && !(await page.locator('#chat .mes').last().locator('.xjc-tail-card').count()), '换一个回复（swipe）时默认不自动出');
+  await page.locator('#chat .mes').last().hover();
+  await page.locator('#chat .mes').last().locator('.swipe_left').click();
+  await page.waitForFunction(() => [...document.querySelectorAll('#chat .mes')].pop()?.querySelector('.xjc-tail-card'), null, { timeout: 10000 }).catch(() => {});
+  ok(await page.locator('#chat .mes').last().locator('.xjc-tail-card').count() === 1, '滑回原来的回复，那篇小剧场还在（新回复不会带上旧回复的小剧场）');
   const calls = mockCalls();
   const mainChat = calls.filter(c => !c.messages.some(m => typeof m.content === 'string' && m.content.includes('<Brief>')));
   ok(mainChat.every(c => !JSON.stringify(c.messages).includes('牌面朝下') && !JSON.stringify(c.messages).includes('<Brief>')), '聊天里的小剧场不会发给模型');
@@ -526,6 +578,14 @@ async function desktop(browser) {
   // 9. 刷新后还在；手动收起的那篇刷新后还是收起的
   await page.locator('#chat .mes .xjc-tail-card').first().locator('.xjc-tail-hd .ttl').click();
   ok(await page.locator('#chat .mes .xjc-tail-card').first().locator('.xjc-tail-bd').isHidden(), '点标题栏收起');
+  // 老数据搬家：settings.json 里的 API 配置、服务器上还没有文件 → 刷新后搬进文件，settings.json 里删掉
+  await page.evaluate(async () => {
+    const c = SillyTavern.getContext();
+    const apis = await (await fetch(`/user/files/xiao-ju-chang-apis.json?t=${Date.now()}`, { cache: 'no-store' })).json();
+    await fetch('/api/files/delete', { method: 'POST', headers: c.getRequestHeaders(), body: JSON.stringify({ path: 'user/files/xiao-ju-chang-apis.json' }) });
+    c.extensionSettings.xiaoJuChang.apis = [...apis, { id: 'a_mig', name: '老配置', format: 'openai', url: 'http://127.0.0.1:5297/v1', key: 'sk-old', model: 'm' }];
+    await (await import('/script.js')).saveSettings();
+  });
   await sleep(1500);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.SillyTavern && document.getElementById('xjc_wand'), null, { timeout: 60000 });
@@ -538,6 +598,16 @@ async function desktop(browser) {
   await page.click('#xjc_wand');
   await page.click('.xjc-tabs button[data-v="fav"]');
   ok(await page.locator('.xjc-view[data-view="fav"] .xjc-item').count() === 1, '刷新后收藏还在');
+  const mig = await page.evaluate(async () => {
+    const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
+    const f = await fetch(`/user/files/xiao-ju-chang-apis.json?t=${Date.now()}`, { cache: 'no-store' });
+    const file = f.ok ? await f.json() : [];
+    const r = { inState: s.state.apis.some(a => a.id === 'a_mig'), inFile: file.some(a => a.id === 'a_mig'), bag: 'apis' in SillyTavern.getContext().extensionSettings.xiaoJuChang };
+    s.state.apis = s.state.apis.filter(a => a.id !== 'a_mig');
+    await s.save('apis');
+    return r;
+  });
+  ok(mig.inState && mig.inFile && !mig.bag, `以前存在 settings.json 里的 API 配置自动搬进单独的文件（${JSON.stringify(mig)}）`);
   await page.click('.xjc-view[data-view="fav"] .xjc-seg >> text=本聊天');
   ok(await page.locator('.xjc-view[data-view="fav"] .xjc-item').count() >= 3, '「本聊天」列出挂在消息下的小剧场');
 

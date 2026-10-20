@@ -1,6 +1,7 @@
 // 存储：TauriTavern 用宿主的扩展存储（data 目录里，随数据一起备份/同步）；
-// 原版酒馆把设置和库放进 extension_settings（存在服务器 settings.json），收藏和最近放浏览器 IndexedDB（体积大，不塞进 settings.json）。
-import { ctx, isTT, clone } from './util.js';
+// 原版酒馆把设置和库放进 extension_settings（存在服务器 settings.json）；收藏、最近（体积大）和 API 配置（含密钥，不放进常被分享的 settings.json）
+// 存成服务器上的用户文件（data/<用户>/user/files/xiao-ju-chang-*.json），换设备、换浏览器都跟着走。以前放在浏览器 IndexedDB / settings.json 里的，第一次读到时搬过去。
+import { ctx, isTT, clone, toast } from './util.js';
 import { DEFAULT_PREAMBLES, DEFAULT_PROMPTS, DEFAULT_RANDOMS, DEFAULT_MACROS, DEFAULT_COMBOS, DEFAULT_SETTINGS } from './defaults.js';
 
 const NS = 'xiao-ju-chang';
@@ -53,6 +54,47 @@ async function idbSet(key, value) {
   });
 }
 
+// ── 原版酒馆：服务器用户文件 ──
+const SERVER_KEYS = [...HEAVY, 'apis'];
+const fileName = key => `xiao-ju-chang-${key}.json`;
+const serverDown = new Set(); // 这次读服务器文件失败的 key：继续用老地方，免得拿空数据覆盖
+function toBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function fileGet(key) {
+  const res = await fetch(`/user/files/${fileName(key)}?t=${Date.now()}`, { cache: 'no-store' });
+  if (res.status === 404) return undefined;
+  if (!res.ok) throw new Error(`读取 ${fileName(key)} 失败：${res.status}`);
+  return res.json();
+}
+async function fileSet(key, value) {
+  const res = await fetch('/api/files/upload', { method: 'POST', headers: ctx().getRequestHeaders(), body: JSON.stringify({ name: fileName(key), data: toBase64(JSON.stringify(value)) }) });
+  if (!res.ok) throw new Error(`保存 ${fileName(key)} 失败：${res.status}`);
+}
+const legacyGet = key => (HEAVY.includes(key) ? idbGet(key).catch(() => undefined) : Promise.resolve(clone(stBag()[key])));
+async function serverRead(key) {
+  try {
+    const v = await fileGet(key);
+    if (v !== undefined) return v;
+  } catch (e) {
+    console.warn('[小剧场]', e);
+    serverDown.add(key);
+    return legacyGet(key);
+  }
+  // 服务器上还没有：把老地方的搬过去；搬成功了再把 settings.json 里的 API 配置删掉
+  const old = await legacyGet(key);
+  if (old !== undefined) {
+    try {
+      await fileSet(key, old);
+      if (key in stBag()) { delete stBag()[key]; ctx().saveSettingsDebounced(); }
+    } catch (e) { console.warn('[小剧场] 搬到服务器文件失败，先继续用老地方', e); serverDown.add(key); }
+  }
+  return old;
+}
+
 function stBag() {
   const all = ctx().extensionSettings;
   if (!all[ST_KEY] || typeof all[ST_KEY] !== 'object') all[ST_KEY] = {};
@@ -65,7 +107,7 @@ async function readKey(key) {
     const r = await store.tryGetJson({ namespace: NS, key });
     return r && r.found ? r.value : undefined;
   }
-  if (HEAVY.includes(key)) return idbGet(key);
+  if (SERVER_KEYS.includes(key)) return serverRead(key);
   return clone(stBag()[key]);
 }
 
@@ -75,16 +117,18 @@ function writeKey(key, value) {
   const next = prev.catch(() => {}).then(async () => {
     const store = await ttReady();
     if (store) return store.setJson({ namespace: NS, key, value });
+    if (SERVER_KEYS.includes(key) && !serverDown.has(key)) return fileSet(key, value);
     if (HEAVY.includes(key)) return idbSet(key, value);
     stBag()[key] = value;
     ctx().saveSettingsDebounced();
   });
   queues.set(key, next);
+  next.catch(e => { console.error('[小剧场] 保存失败', key, e); toast(`小剧场：「${key}」没保存上（${e.message || e}），稍后再改一次会重试`); });
   return next;
 }
 
 export function backendName() {
-  return isTT() ? 'TauriTavern 扩展存储' : '酒馆设置 + 浏览器本地（收藏/最近）';
+  return isTT() ? 'TauriTavern 扩展存储' : '酒馆服务器（库和设置在 settings.json；收藏、最近、API 配置是单独的用户文件 user/files/xiao-ju-chang-*.json）';
 }
 
 // ── 读写 ──

@@ -4,7 +4,7 @@ import { expandMacros, shuffle } from './macros.js';
 import { state } from './store.js';
 import { LENGTH_CHARS, LENGTH_LABEL } from './defaults.js';
 import { instr } from './instr.js';
-import { buildMaterials, callModel, callQuiet, writeBackToLore, resolveTarget, userName } from './host.js';
+import { buildMaterials, callModel, callQuiet, writeBackToLore, resolveTarget, userName, currentChar } from './host.js';
 import { resolveCombo } from './follow.js';
 
 const STYLE_HINT = { vars: 'styleVars', strict: 'styleStrict' };
@@ -277,7 +277,7 @@ async function generateOnce(comboIn, opts = {}) {
     return callModel(messages, { target, onChunk, signal });
   };
   const base = {
-    id: uid('r'), characterName: mat.charName,
+    id: uid('r'), characterName: mat.charName, characterAvatar: currentChar()?.avatar || '',
     createdAt: new Date().toISOString(), comboCopy: combo, target, request: sent, ...(channelNote ? { channelNote } : {}),
   };
 

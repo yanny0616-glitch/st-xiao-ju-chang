@@ -19,7 +19,21 @@ import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { attachToLatest } from './chat.js';
 
 let root = null, panelEl = null, bodyEl = null, kickerEl = null;
-let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', favFilter = 'all', promptFilter = '';
+let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', favFilter = 'all', promptFilter = '', favScope = 'char', favQuery = '';
+/** 这篇是不是当前聊天角色的（新的按头像文件认，老的按名字） */
+const ofCurrentChar = r => { const c = currentChar(); if (!c) return true; return r.characterAvatar ? r.characterAvatar === c.avatar : r.characterName === c.name; };
+/** 「当前角色 / 全部」两个筛选胶囊；全是当前角色的就不显示 */
+function scopeChips(all, mine, scope, onPick) {
+  const chips = el('div', 'xjc-chips');
+  if (!currentChar() || mine === all) return chips;
+  for (const o of [{ v: 'char', l: `${currentChar().name} ${mine}` }, { v: 'all', l: `全部角色 ${all}` }]) {
+    const c = el('button', 'xjc-chip' + (scope === o.v ? ' on' : ''), o.l);
+    c.type = 'button';
+    c.onclick = () => onPick(o.v);
+    chips.appendChild(c);
+  }
+  return chips;
+}
 const views = {};
 const stageBox = {};
 let busy = null, runSeq = 0;
@@ -300,8 +314,15 @@ function renderRecent() {
   box.innerHTML = '';
   if (!state.recent.length) return;
   box.appendChild(el('div', 'xjc-sec', `最近 · 保留 ${state.settings.recentKeep} 篇`));
+  // 默认只看当前角色的；切到别的角色时不会满屏是别人的
+  const mine = state.recent.filter(ofCurrentChar);
+  const scope = S().recentScope === 'all' ? 'all' : 'char';
+  const chips = scopeChips(state.recent.length, mine.length, scope, v => { setSetting({ recentScope: v }); renderRecent(); });
+  if (chips.children.length) { chips.style.marginBottom = '8px'; box.appendChild(chips); }
+  const shown = scope === 'all' || !chips.children.length ? state.recent : mine;
   const list = el('div', 'xjc-list');
-  for (const r of state.recent) list.appendChild(resultItem(r, () => { showResult(r); stageBox.result.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+  if (!shown.length) list.appendChild(el('div', 'xjc-empty', `${currentChar()?.name || '这个角色'}还没有最近的小剧场。`));
+  for (const r of shown) list.appendChild(resultItem(r, () => { showResult(r); stageBox.result.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
   box.appendChild(list);
 }
 
@@ -309,7 +330,7 @@ function resultItem(r, onClick, endText) {
   const item = el('div', 'xjc-item');
   const mid = el('div', 'xjc-grow');
   mid.appendChild(el('div', 't', `${isFavorite(r) ? '♥ ' : ''}${r.title || '无题'}`));
-  mid.appendChild(el('div', 'd', `${KIND_LABEL[kindOf(r)]} · ${r.snapshot?.comboName || ''}`));
+  mid.appendChild(el('div', 'd', [KIND_LABEL[kindOf(r)], r.snapshot?.comboName, r.characterName].filter(Boolean).join(' · ')));
   item.append(mid, el('div', 'end', endText || fmtTime(r.createdAt)));
   item.onclick = onClick;
   return item;
@@ -1060,10 +1081,28 @@ function renderFav() {
     chips.appendChild(c);
   }
   box.appendChild(chips);
+  const mine = state.favorites.filter(ofCurrentChar);
+  const scope = scopeChips(state.favorites.length, mine.length, favScope, v => { favScope = v; renderFav(); });
+  if (scope.children.length) { scope.style.marginTop = '8px'; box.appendChild(scope); }
+  const byScope = favScope === 'all' || !scope.children.length ? state.favorites : mine;
+  // 收藏多了能搜：标题、小剧场名、角色名、提示词名
+  if (state.favorites.length > 6) {
+    const q = input(favQuery, '搜标题 / 小剧场 / 角色 / 提示词');
+    q.type = 'search';
+    q.style.marginTop = '10px';
+    q.oninput = () => { favQuery = q.value; paint(); };
+    box.appendChild(q);
+  }
   const list = el('div', 'xjc-list');
   list.style.marginTop = '12px';
-  const shown = [...state.favorites].reverse().filter(r => favFilter === 'all' || (favFilter === 'html' ? kindOf(r) !== 'text' : kindOf(r) === 'text'));
-  if (!shown.length) list.appendChild(el('div', 'xjc-empty', '这一类还没有收藏。'));
+  box.appendChild(list);
+  const paint = () => {
+  list.innerHTML = '';
+  const k = favQuery.trim().toLowerCase();
+  const shown = [...byScope].reverse()
+    .filter(r => favFilter === 'all' || (favFilter === 'html' ? kindOf(r) !== 'text' : kindOf(r) === 'text'))
+    .filter(r => !k || [r.title, r.snapshot?.comboName, r.characterName, ...(r.snapshot?.prompts || [])].filter(Boolean).join(' ').toLowerCase().includes(k));
+  if (!shown.length) list.appendChild(el('div', 'xjc-empty', k ? '没有搜到。' : '这一类还没有收藏。'));
   for (const f of shown) {
     list.appendChild(resultItem(f, () => openViewer(f, {
       actions: [
@@ -1075,7 +1114,8 @@ function renderFav() {
       onAction: text => continueFrom(f, text),
     })));
   }
-  box.appendChild(list);
+  };
+  paint();
 }
 
 // ── 设置 ──
@@ -1263,6 +1303,7 @@ function setChat(box) {
   const chance = input(t.chance, '', 'number');
   chance.onchange = () => put({ chance: Math.max(1, Math.min(100, Number(chance.value) || 30)) });
   autoBox.appendChild(field('自动出的概率（%）', chance, '100 = 每条回复都出。'));
+  autoBox.appendChild(toggle('换一个回复（swipe）、重新生成时也自动出', t.autoOnSwipe, v => put({ autoOnSwipe: v })));
   const comboSel = select(state.combos.map(c => ({ v: c.id, l: c.name })), t.comboId || state.combos[0]?.id);
   comboSel.onchange = () => put({ comboId: comboSel.value });
   const cf = field('用这个小剧场', comboSel);
