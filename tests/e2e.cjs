@@ -202,6 +202,23 @@ async function desktop(browser) {
   await page.click('.xjc-extra-box .xjc-btn:has-text("不用了")');
   ok(await page.locator('.xjc-extra textarea').isHidden() && (await page.inputValue('.xjc-extra textarea')) === '', '「不用了」清空并收起');
 
+  // 3c. 不建小剧场，直接挑提示词生成；觉得好再存成小剧场
+  const pTitles = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.slice(0, 2).map(p => ({ t: p.title, c: p.content.split(/\{\{[^}]*\}\}|[\n，。]/).sort((a, b) => b.length - a.length)[0].slice(0, 10) })));
+  await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
+  await page.click('.xjc-sheet .xjc-seg button:has-text("直接用提示词")');
+  for (const p of pTitles) await page.click(`.xjc-sheet .xjc-item:has(.t:text-is("${p.t}"))`);
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("用这 2 条")');
+  ok((await page.textContent('.xjc-combo-card .nm')).includes('临时'), '舞台上是临时拼的（直接用提示词）');
+  const nCombos = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.combos.length);
+  await page.click('.xjc-actions .pri');
+  await waitResult(page);
+  const tmpSys = lastCall().messages.map(m => m.content).join('\n');
+  ok(pTitles.every(p => tmpSys.includes(p.c)), `直接用提示词生成：选的几条都发给了模型（${pTitles.map(p => p.t + ':' + tmpSys.includes(p.c)).join(' ')}）`);
+  await page.click('.xjc-combo-card .xjc-btn:has-text("存成小剧场")');
+  await page.click('.xjc-sheet-ft >> text="保存"');
+  const after3c = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.id === s.settings.currentComboId); return { n: s.combos.length, ids: c?.promptIds?.length }; });
+  ok(after3c.n === nCombos + 1 && after3c.ids === 2 && !(await page.textContent('.xjc-combo-card .nm')).includes('临时'), '「存成小剧场」存进库并放到舞台');
+
   // 4. 自配 API：拉模型、测试、设为默认、流式
   await page.click('.xjc-tabs button[data-v="settings"]');
   await page.click('.xjc-view[data-view="settings"] .xjc-seg >> text=API');

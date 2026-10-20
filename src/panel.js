@@ -141,7 +141,20 @@ function buildStage() {
   v.append(stageBox.notice, stageBox.pick, stageBox.extra, stageBox.actions, stageBox.result, stageBox.recent);
 }
 
-function currentCombo() { return byId(state.combos, state.settings.currentComboId) || state.combos[0] || null; }
+// 直接用提示词生成：currentComboId 为 TEMP 时，舞台上是用 stagePromptIds 临时拼的小剧场（不进库，其余都跟随全局）
+const TEMP = '@prompts';
+function tempCombo() {
+  const ps = (state.settings.stagePromptIds || []).map(id => byId(state.prompts, id)).filter(Boolean);
+  if (!ps.length) return null;
+  return {
+    ...newCombo(), id: '', temp: true, name: ps.length === 1 ? ps[0].title : `${ps[0].title} 等 ${ps.length} 条`,
+    promptIds: ps.map(p => p.id), output: { ...newCombo().output, mode: 'mixed' },
+  };
+}
+function currentCombo() {
+  if (state.settings.currentComboId === TEMP) { const t = tempCombo(); if (t) return t; }
+  return byId(state.combos, state.settings.currentComboId) || state.combos[0] || null;
+}
 function renderStage() {
   renderNotice();
   renderPick();
@@ -177,40 +190,68 @@ function comboChips(raw) {
 function renderPick() {
   const box = stageBox.pick;
   box.innerHTML = '';
-  if (!state.combos.length) {
-    box.appendChild(el('div', 'xjc-empty', '还没有小剧场，去「库」里建一个。'));
+  const cur = currentCombo();
+  if (!cur) {
+    if (!state.prompts.length) { box.appendChild(el('div', 'xjc-empty', '还没有小剧场和提示词，去「库」里建一个。')); return; }
+    box.appendChild(btn('选小剧场或提示词 ›', pickCombo, 'xjc-btn'));
     return;
   }
   // 和 Float 一样：舞台只放当前这一个，点卡片弹出列表换
-  const cur = currentCombo();
   const card = el('div', 'xjc-combo-card');
   card.dataset.scene = String(state.combos.indexOf(cur) + 1);
-  card.title = '点一下换一个小剧场';
+  card.title = '点一下换一个';
   card.onclick = e => { if (!e.target.closest('.xjc-btn')) pickCombo(); };
   const row = el('div', 'xjc-row nowrap');
-  row.append(el('div', 'nm xjc-grow', cur.name), btn('编辑', () => editCombo(cur), 'xjc-btn sm ghost'), btn('换一个 ›', pickCombo, 'xjc-btn sm'));
+  const nm = el('div', 'nm xjc-grow', cur.name);
+  if (cur.temp) nm.prepend(el('span', 'xjc-temp', '临时'));
+  const edit = cur.temp
+    ? btn('存成小剧场', () => { const { temp, ...draft } = cur; editCombo(null, draft); }, 'xjc-btn sm ghost')
+    : btn('编辑', () => editCombo(cur), 'xjc-btn sm ghost');
+  row.append(nm, edit, btn('换一个 ›', pickCombo, 'xjc-btn sm'));
   card.append(row, comboChips(cur));
   box.appendChild(card);
 }
 
 /** 选小剧场：可搜索、按标签筛；点一行就设为当前 */
 function pickCombo() {
-  openSheet(`选小剧场（${state.combos.length}）`, (body, foot, closeIt) => {
+  openSheet('换一个', (body, foot, closeIt) => {
+    // 两种选法：选一个存好的小剧场，或者直接挑几条提示词（临时拼，不进库）
+    let mode = state.settings.currentComboId === TEMP || !state.combos.length ? 'prompts' : 'combos';
+    const modeSeg = seg([{ v: 'combos', l: `小剧场（${state.combos.length}）` }, { v: 'prompts', l: `直接用提示词（${state.prompts.length}）` }], mode, v => { mode = v; q = ''; tag = ''; search.value = ''; build(); });
+    body.appendChild(modeSeg);
     let q = '', tag = '';
-    const curId = currentCombo()?.id;
-    if (state.combos.length > 6) {
-      const search = input('', '搜名字 / 标签');
-      search.type = 'search';
-      search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
-      body.appendChild(search);
-    }
-    const tags = allTags(state.combos);
+    const curId = state.settings.currentComboId;
+    const picked = new Set(state.settings.currentComboId === TEMP ? state.settings.stagePromptIds || [] : []);
+    const search = input('', '搜名字 / 标签');
+    search.type = 'search';
+    search.style.marginTop = '10px';
+    search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
+    body.appendChild(search);
+    const hint = el('p', 'xjc-hint', '点选一条或几条，按顺序拼在一起生成；前置要求用默认的那条，其他都跟随全局。觉得好用可以在舞台上「存成小剧场」。');
+    body.appendChild(hint);
     const chips = el('div', 'xjc-chips');
     chips.style.margin = '10px 0 4px';
-    if (tags.length) body.appendChild(chips);
+    body.appendChild(chips);
     const list = el('div', 'xjc-list');
     list.style.marginTop = '8px';
     body.appendChild(list);
+    const useBtn = btn('用选中的提示词', () => {
+      if (!picked.size) { toast('先点选至少一条提示词'); return; }
+      setSetting({ currentComboId: TEMP, stagePromptIds: [...picked] }); closeIt(); renderPick();
+    }, 'xjc-btn pri');
+    const newBtn = btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn');
+    foot.append(newBtn, useBtn);
+    let tags = [];
+    const build = () => {
+      tags = allTags(mode === 'combos' ? state.combos : state.prompts);
+      chips.hidden = !tags.length;
+      hint.hidden = mode !== 'prompts';
+      search.hidden = (mode === 'combos' ? state.combos : state.prompts).length <= 6;
+      newBtn.hidden = mode !== 'combos';
+      useBtn.hidden = mode !== 'prompts';
+      drawTags(); draw();
+    };
+    const paintUse = () => { useBtn.textContent = picked.size ? `用这 ${picked.size} 条` : '用选中的提示词'; };
     const drawTags = () => {
       chips.innerHTML = '';
       for (const t of ['', ...tags]) {
@@ -222,6 +263,21 @@ function pickCombo() {
     };
     const draw = () => {
       list.innerHTML = '';
+      if (mode === 'prompts') {
+        const shownP = state.prompts.filter(p => (!tag || (p.tags || []).includes(tag)) && (!q || (p.title + ' ' + (p.tags || []).join(' ')).toLowerCase().includes(q)));
+        if (!shownP.length) list.appendChild(el('div', 'xjc-empty', state.prompts.length ? '没有匹配的提示词' : '提示词库是空的'));
+        const order = [...picked];
+        for (const p of shownP) {
+          const it = itemRow(p.title, `${(p.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${String(p.content || '').replace(/\s+/g, ' ').slice(0, 40)}`, () => {
+            if (picked.has(p.id)) picked.delete(p.id); else picked.add(p.id);
+            draw();
+          }, picked.has(p.id) ? `第 ${order.indexOf(p.id) + 1} 条` : '');
+          if (picked.has(p.id)) it.classList.add('on');
+          list.appendChild(it);
+        }
+        paintUse();
+        return;
+      }
       const shown = state.combos.filter(c => (!tag || (c.tags || []).includes(tag)) && (!q || (c.name + ' ' + (c.tags || []).join(' ')).toLowerCase().includes(q)));
       if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的小剧场'));
       for (const c of shown) {
@@ -234,9 +290,7 @@ function pickCombo() {
         list.appendChild(it);
       }
     };
-    drawTags();
-    draw();
-    foot.appendChild(btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn'));
+    build();
   });
 }
 
@@ -550,6 +604,9 @@ function editText(kind, row) {
     body.appendChild(field('内容', c));
     let def = null;
     if (isPre) { def = toggle('设为默认（AI 自选、新建小剧场用它）', row && row.id === state.settings.defaultPreambleId); body.appendChild(def); }
+    // 新写的提示词可以顺手建成一个小剧场；不建也行，舞台上「换一个 → 直接用提示词」就能用
+    let asCombo = null;
+    if (!row && kind === 'prompts') { asCombo = toggle('同时建成一个小剧场（只含这一条，其他跟随全局）', false); body.appendChild(asCombo); }
     if (row) {
       foot.appendChild(btn('删除', async () => {
         if (isPre && state.preambles.length <= 1) { toast('至少留一条前置要求'); return; }
@@ -575,6 +632,7 @@ function editText(kind, row) {
       const data = isPre ? { id: row?.id || uid('pre'), name: title, content: c.value } : { id: row?.id || uid(kind.slice(0, 3)), title, tags: textToTags(tg.value), content: c.value };
       const saved = upsert(kind, data);
       if (isPre && def.input.checked) setSetting({ defaultPreambleId: saved.id });
+      if (asCombo?.input.checked) combosFromPrompts([saved], { output: { mode: 'mixed' } }).then(() => toast('也建成了一个小剧场'));
       closeIt(); renderLibrary();
     }, 'xjc-btn pri'));
   });
@@ -617,8 +675,8 @@ function newCombo() {
   };
 }
 
-function editCombo(row) {
-  const d = clone(row || newCombo());
+function editCombo(row, draft = null) {
+  const d = clone(row || draft || newCombo());
   d.output = { ...newCombo().output, ...d.output };
   d.random = { ...newCombo().random, ...d.random };
   // 自定上下文时的起点：已有自定值就用它，否则从当前全局值开始改
