@@ -219,6 +219,42 @@ async function desktop(browser) {
   const after3c = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.id === s.settings.currentComboId); return { n: s.combos.length, ids: c?.promptIds?.length }; });
   ok(after3c.n === nCombos + 1 && after3c.ids === 2 && !(await page.textContent('.xjc-combo-card .nm')).includes('临时'), '「存成小剧场」存进库并放到舞台');
 
+  // 3d. 内置指令可以改：改了「纯文字」的输出要求，发给模型的就是改过的；恢复默认后回到原样
+  await page.click('.xjc-tabs button[data-v="settings"]');
+  await page.click('.xjc-view[data-view="settings"] .xjc-seg >> text=生成');
+  await page.click('.xjc-view[data-view="settings"] .xjc-btn:has-text("编辑内置指令")');
+  const outTextBox = page.locator('.xjc-sheet .xjc-field:has(> .lb:has-text("纯文字")) textarea').first();
+  await outTextBox.fill('只写纯文字，每段不超过三句。【改过的纯文字要求】');
+  ok(await page.locator('.xjc-sheet .xjc-field:has(> .lb:has-text("纯文字")) .xjc-temp').first().isVisible(), '改过的内置指令标「已改」');
+  await page.click('.xjc-sheet-ft >> text="保存"');
+  const instrRun = await page.evaluate(async () => {
+    const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
+    const s = await import(base + 'store.js');
+    const g = await import(base + 'gen.js');
+    const c = { ...s.state.combos.find(x => x.id === 'c_store'), output: { ...s.state.combos.find(x => x.id === 'c_store').output, mode: 'text' } };
+    const r = await g.generateTheater(c, {});
+    return r.request[0].messages.map(m => m.content).join('\n');
+  });
+  ok(instrRun.includes('【改过的纯文字要求】') && !instrRun.includes('只输出纯文字正文'), '改过的内置指令发给了模型');
+  await page.click('.xjc-view[data-view="settings"] .xjc-btn:has-text("编辑内置指令")');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("全部恢复默认")');
+  await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("恢复")').click();
+  await page.click('.xjc-sheet-ft >> text="保存"');
+  ok(await page.evaluate(async () => Object.keys((await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.settings.instr || {}).length === 0), '内置指令全部恢复默认');
+  // AI 自选：没有带「形式」标签的提示词时，用全部提示词当菜单
+  const aiMenu = await page.evaluate(async () => {
+    const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
+    const s = await import(base + 'store.js');
+    const g = await import(base + 'gen.js');
+    const keep = s.state.prompts.map(p => p.tags);
+    s.state.prompts.forEach(p => { p.tags = (p.tags || []).filter(t => t !== '形式'); });
+    const menu = g.aiPickCombo()._virtualPrompts[0].content;
+    s.state.prompts.forEach((p, i) => { p.tags = keep[i]; });
+    return menu.includes('1. ') && menu.includes(s.state.prompts[0].title);
+  });
+  ok(aiMenu, 'AI 自选：没有「形式」标签时用全部提示词当菜单');
+  await page.click('.xjc-tabs button[data-v="stage"]');
+
   // 4. 自配 API：拉模型、测试、设为默认、流式
   await page.click('.xjc-tabs button[data-v="settings"]');
   await page.click('.xjc-view[data-view="settings"] .xjc-seg >> text=API');
@@ -414,6 +450,16 @@ async function desktop(browser) {
   ok(q && !qs.includes('<CharacterSheet>') && qs.includes('林晚是'), '走酒馆预设：材料由酒馆拼（有角色卡、没有插件自己的 <CharacterSheet>）');
   const qreq = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0].request);
   ok(qreq && qreq[0].via === 'preset' && !qreq[0].partial && JSON.stringify(qreq[0].messages).includes('林晚是') && JSON.stringify(qreq[0].messages).includes('<Brief>'), '走酒馆预设：记下的是酒馆拼好、实际发出去的消息');
+  // 在更早的楼层下出：酒馆预设会带上之后的聊天，自动改用插件自己拼
+  const older = await page.evaluate(async () => {
+    const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
+    const s = await import(base + 'store.js');
+    const g = await import(base + 'gen.js');
+    const c = { ...s.state.combos.find(x => x.id === 'c_store'), writeBack: false };
+    const r = await g.generateTheater(c, { uptoIndex: 0 });
+    return { note: r.channelNote || '', via: r.request?.[0]?.via, sys: r.request?.[0]?.messages?.[0]?.content || '' };
+  });
+  ok(older.via !== 'preset' && older.note.includes('更早的楼层') && older.sys.includes('<CharacterSheet>'), `走酒馆预设 + 更早的楼层：改用插件自己拼并注明（${older.note}）`);
   await sleep(1500);
   const lore = await page.evaluate(async () => {
     const c = SillyTavern.getContext();

@@ -6,6 +6,7 @@ import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, resul
 import { mountFrame, markTheme } from './frame.js';
 import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
+import { instr } from './instr.js';
 import { isFavorite, toggleFavorite } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
@@ -65,7 +66,7 @@ export async function generateFor(mesId, { combo, extra } = {}) {
   const ctrl = new AbortController();
   running.set(msg, { ctrl, name: use.name, t0: Date.now() });
   renderTail(mesId);
-  const tail = '【接在聊天后面】这一篇挂在刚才这条消息下面，内容要和这条消息里刚发生的事有关，可以是它的番外、旁观视角或另一种呈现，但不要复述原文。';
+  const tail = instr('tail');
   try {
     const result = await generateTheater(use, { uptoIndex: mesId, extra: [tail, extra].filter(Boolean).join('\n'), signal: ctrl.signal });
     if (!result || ctrl.signal.aborted) return;

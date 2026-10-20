@@ -7,6 +7,7 @@ import {
   generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, segmentsOf, kindOf, KIND_LABEL, charCount,
   resultPlainText, contextLabel, postProcess,
 } from './gen.js';
+import { INSTR, instrDefault, instrEdited } from './instr.js';
 import { resolveCombo, globalContext, globalWho, globalChannel, globalStyle, globalStaged, globalWriteBack, WHO_LABEL, CHANNEL_LABEL, STYLE_LABEL } from './follow.js';
 import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
@@ -494,7 +495,7 @@ export async function run(combo, extra = '') {
 
 // ── 库 ──
 const LIB_TABS = [
-  { v: 'combos', l: '小剧场' }, { v: 'prompts', l: '提示词' }, { v: 'randoms', l: '随机' }, { v: 'preambles', l: '前置' },
+  { v: 'combos', l: '小剧场' }, { v: 'prompts', l: '提示词' }, { v: 'randoms', l: '随机池' }, { v: 'preambles', l: '前置' },
 ];
 function renderLibrary() {
   const v = views.library;
@@ -585,6 +586,46 @@ function libPreambles(box) {
   for (const p of state.preambles) { const used = state.combos.filter(c => c.preambleId === p.id).length; list.appendChild(itemRow(p.name, p.content.replace(/\s+/g, ' ').slice(0, 70), () => editText('preambles', p), [p.id === state.settings.defaultPreambleId ? '默认' : '', used ? `${used} 个小剧场在用` : ''].filter(Boolean).join(' · '))); }
   box.appendChild(list);
   box.appendChild(el('p', 'xjc-hint', '发给模型的顺序：① 材料（角色卡、用户人设、世界书、总结、最近聊天，按小剧场的设置取）② 前置要求 ③ <Brief>（提示词、随机、输出要求）。酒馆预设里的破限、文风、正文格式条目都不会带进来；需要的话写进前置要求。'));
+}
+
+/** 内置指令：每条一个输入框，改过的标「已改」、能单独恢复默认；保存时和默认一样的就当没改 */
+function editInstr() {
+  openSheet('内置指令', (body, foot, closeIt) => {
+    body.appendChild(el('p', 'xjc-hint', '{用户} {字数} 这类花括号是插件填的变量，改的时候留着。小剧场的提示词、前置要求在「库」里改；这里是所有小剧场共用的格式要求。'));
+    const boxes = new Map();
+    let group = '';
+    for (const x of INSTR) {
+      if (x.group !== group) { group = x.group; body.appendChild(el('div', 'xjc-sec', group)); }
+      const ta = textarea(state.settings.instr?.[x.key] ?? x.text, Math.min(8, Math.max(2, Math.ceil(x.text.length / 48))));
+      boxes.set(x.key, ta);
+      const hints = [x.vars ? `变量：${x.vars.map(v => `{${v}}`).join(' ')}` : '', x.note || ''].filter(Boolean).join(' ');
+      // 包一层 div：标题里有「恢复默认」按钮，用 <label> 的话点标题会误点到它
+      const wrap = el('div');
+      wrap.appendChild(ta);
+      const f = field(x.label, wrap, hints);
+      const lb = f.querySelector('.lb');
+      const reset = btn('恢复默认', () => { ta.value = instrDefault(x.key); paint(); }, 'xjc-btn sm ghost xjc-instr-reset');
+      const tag = el('span', 'xjc-temp', '已改');
+      const paint = () => { const on = ta.value !== instrDefault(x.key); reset.hidden = !on; tag.hidden = !on; };
+      ta.addEventListener('input', paint);
+      lb?.append(' ', tag, reset);
+      paint();
+      body.appendChild(f);
+    }
+    foot.appendChild(btn('全部恢复默认', async () => {
+      if (!(await confirmSheet('全部恢复默认', '所有内置指令都改回默认？', '恢复'))) return;
+      for (const [k, ta] of boxes) ta.value = instrDefault(k);
+      body.querySelectorAll('textarea').forEach(t => t.dispatchEvent(new Event('input')));
+    }, 'xjc-btn ghost'));
+    foot.appendChild(btn('保存', async () => {
+      const next = {};
+      for (const [k, ta] of boxes) if (ta.value.trim() && ta.value !== instrDefault(k)) next[k] = ta.value;
+      await setSetting({ instr: next });
+      toast('内置指令已保存');
+      closeIt();
+      renderSettings();
+    }, 'xjc-btn pri'));
+  });
 }
 
 /** 提示词 / 随机条目 / 前置要求 共用一个编辑框 */
@@ -759,10 +800,17 @@ function editCombo(row, draft = null) {
 
     body.appendChild(el('div', 'xjc-sec', '上下文'));
     const ctxBox = el('div');
-    const syncChannel = () => { ctxBox.hidden = (d.channel || globalChannel()) === 'preset'; };
-    body.appendChild(field('通道', seg([{ v: '', l: follow(CHANNEL_LABEL[globalChannel()]) }, { v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], d.channel || '', v => { d.channel = v; syncChannel(); }),
-      '自己拼：只带下面的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），只对「跟随酒馆当前 API」有效，不能边写边显示。'));
-    body.appendChild(ctxBox);
+    // 出口不是「跟随酒馆当前 API」时走不了酒馆预设，通道收起来、说明原因
+    let exitIsSt = () => true;
+    const channelNote = el('p', 'xjc-hint', '出口不是「跟随酒馆当前 API」，只能插件自己拼，通道不用选。');
+    const syncChannel = () => {
+      const st = exitIsSt();
+      channelF.hidden = !st; channelNote.hidden = st;
+      ctxBox.hidden = st && (d.channel || globalChannel()) === 'preset';
+    };
+    const channelF = field('通道', seg([{ v: '', l: follow(CHANNEL_LABEL[globalChannel()]) }, { v: 'own', l: '插件自己拼' }, { v: 'preset', l: '走酒馆预设' }], d.channel || '', v => { d.channel = v; syncChannel(); }),
+      '自己拼：只带下面的材料，不带酒馆预设里的破限/文风。走酒馆预设：用酒馆的完整生成流程（预设、角色卡、世界书、聊天记录都由酒馆拼），不能边写边显示；在更早的楼层下出时会自动改用自己拼（酒馆预设没法截掉之后的聊天）。');
+    body.append(channelF, channelNote, ctxBox);
     // 材料：默认跟随全局，选「自定」才展开具体选项
     const custom = el('div');
     const gctx = globalContext();
@@ -791,6 +839,9 @@ function editCombo(row, draft = null) {
 
     body.appendChild(el('div', 'xjc-sec', '其他'));
     const api = select([{ v: '', l: `跟随全局（${targetLabel(state.settings.api)}）` }, ...apiTargets()], d.api || '');
+    exitIsSt = () => resolveTarget(api.value) === 'st';
+    api.addEventListener('change', syncChannel);
+    syncChannel();
     const weight = input(d.weight ?? 1, '', 'number');
     const g3 = el('div', 'xjc-grid2');
     g3.append(field('出口', api), field('随机权重', weight, '「随机」按权重抽，0 = 不参与'));
@@ -1056,7 +1107,12 @@ function setGen(box) {
   box.appendChild(toggle('限制篇幅', S().lengthLimit, v => { setSetting({ lengthLimit: v }); lenF.hidden = !v; }));
   box.appendChild(lenF);
   lenF.hidden = !S().lengthLimit;
-  box.appendChild(field('我在戏里是谁', seg(Object.entries(WHO_LABEL).map(([v, l]) => ({ v, l })), globalWho(), v => setSetting({ defaultWho: v })), '选「自定身份」的话，具体身份要在各个小剧场里写。'));
+  const gWhoText = input(S().defaultWhoText || '', '比如：TA 的新同事');
+  gWhoText.onchange = () => setSetting({ defaultWhoText: gWhoText.value.trim() });
+  const gWhoF = field('自定身份', gWhoText, '跟随全局的小剧场用这个身份；小剧场里自己写了身份的用它自己的。');
+  box.appendChild(field('我在戏里是谁', seg(Object.entries(WHO_LABEL).map(([v, l]) => ({ v, l })), globalWho(), v => { setSetting({ defaultWho: v }); gWhoF.hidden = v !== 'custom'; })));
+  box.appendChild(gWhoF);
+  gWhoF.hidden = globalWho() !== 'custom';
   box.appendChild(field('通道', seg(Object.entries(CHANNEL_LABEL).map(([v, l]) => ({ v, l })), globalChannel(), v => setSetting({ defaultChannel: v }))));
   const roundsIn = input(S().defaultRounds || 12, '', 'number');
   roundsIn.onchange = () => setSetting({ defaultRounds: Math.max(1, Math.min(100, Number(roundsIn.value) || 12)) });
@@ -1071,6 +1127,11 @@ function setGen(box) {
   box.appendChild(field('HTML 风格', style));
   box.appendChild(toggle('HTML 小剧场分两步出', globalStaged(), v => setSetting({ stagedDefault: v })));
   if (S().writeBackFeature) box.appendChild(toggle('写回记忆（写进聊天的世界书）', globalWriteBack(), v => setSetting({ writeBackDefault: v })));
+  box.appendChild(el('div', 'xjc-sec', '内置指令'));
+  const nEdited = INSTR.filter(x => instrEdited(x.key)).length;
+  box.appendChild(el('p', 'xjc-hint', `插件自己加在 <Brief> 里的话：纯文字 / HTML / 混排的输出要求、HTML 规则、篇幅、标题、身份、分两步出、楼层下出、AI 自选等。${nEdited ? `已改 ${nEdited} 条。` : '都是默认的。'}`));
+  box.appendChild(btn('编辑内置指令', editInstr, 'xjc-btn'));
+
   box.appendChild(el('div', 'xjc-sec', '可选功能'));
   box.appendChild(toggle('写回记忆：小剧场里多一个开关，开了的那篇生成后把梗概写进这个聊天绑定的世界书，之后聊天时模型会记得（默认关）', !!S().writeBackFeature, v => { setSetting({ writeBackFeature: v }); renderSettings(); }));
   box.appendChild(el('div', 'xjc-sec', '最近'));

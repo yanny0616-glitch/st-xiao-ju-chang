@@ -2,15 +2,13 @@
 import { ctx, clone, byId, esc, uid, plain, toast } from './util.js';
 import { expandMacros, shuffle } from './macros.js';
 import { state } from './store.js';
-import { MOBILE_HTML_RULES, LENGTH_CHARS, LENGTH_LABEL } from './defaults.js';
+import { LENGTH_CHARS, LENGTH_LABEL } from './defaults.js';
+import { instr } from './instr.js';
 import { buildMaterials, callModel, callQuiet, writeBackToLore, resolveTarget, userName } from './host.js';
 import { resolveCombo } from './follow.js';
 
-const STYLE_HINT = {
-  free: '',
-  vars: '样式提示：页面外层已定义 CSS 变量 --xjc-bg（底色）--xjc-ink（文字）--xjc-acc（强调色）--xjc-line（细线）--xjc-font（字体），优先使用它们，让画面和小剧场当前的主题协调；其余自由发挥。',
-  strict: '样式约束：颜色只能使用 CSS 变量 --xjc-bg --xjc-ink --xjc-acc --xjc-line（可用 color-mix 或透明度派生），字体只用 --xjc-font；不得自带其他颜色值。',
-};
+const STYLE_HINT = { vars: 'styleVars', strict: 'styleStrict' };
+const styleHint = style => (STYLE_HINT[style] ? instr(STYLE_HINT[style]) : '');
 
 // 组合快照带上可重放的依赖；之后改库、删条目，收藏「按这套再来」仍是当时的要求。随机池保留候选，重放时重新抽
 export function captureCombo(combo) {
@@ -75,32 +73,33 @@ function buildTasks(combo, extra, charName, phase = null) {
   const o = combo.output || {};
   const lines = ['<Brief>'];
   const who = combo.who || 'persona';
-  if (who === 'persona') lines.push(`【身份】故事里的「${mctx.user}」就是用户本人，沿用前面给出的用户人设。`);
-  else if (who === 'custom') lines.push(`【身份】用户在这篇里的身份：${expand(combo.whoText || '', mctx) || '由你根据场景安排'}。忽略前面的用户人设。`);
-  else lines.push(`【身份】用户不出场，只作为旁观者阅读。全篇不要出现「${mctx.user}」这个人，重点写 ${mctx.char} 与其他人。`);
+  const hasPersona = !!String(ctx().powerUserSettings?.persona_description || '').trim();
+  if (who === 'persona') lines.push(`【身份】${instr(hasPersona ? 'whoPersona' : 'whoPersonaBare', { 用户: mctx.user })}`);
+  else if (who === 'custom') lines.push(`【身份】${instr('whoCustom', { 身份: expand(combo.whoText || '', mctx) || '由你根据场景安排' })}`);
+  else lines.push(`【身份】${instr('whoNone', { 用户: mctx.user, 角色: mctx.char })}`);
   let i = 1;
   for (const p of prompts) lines.push(`【任务 ${i++} · ${p.title}】${expand(p.content, mctx)}`);
   for (const r of randoms) lines.push(`【随机附加 · ${r.title}】${expand(r.content, mctx)}`);
   if (extra) lines.push(`【本次追加】${expand(extra, mctx)}`);
   const out = [];
   const kind = phase && phase.kind;
-  const titleLine = '给这一篇起一个不超过 12 字的标题，放在最前面一行，格式：标题：xxx';
+  const titleLine = instr('title');
   if (kind === 'shell') {
-    out.push('这一步只做页面骨架，不写正文。输出一段完整可渲染的 HTML（含 style 与 script），把所有将来要放文字的位置用空的占位元素标出来：<span data-slot="1" data-hint="这里放什么、大约多少字"></span>，编号从 1 递增，占位元素内部留空、不要嵌套占位。栏目名、用户名、时间戳、按钮文字这类界面文字直接写死。占位数量按内容需要，通常 5～40 个。不要 markdown 围栏、不要任何 HTML 之外的说明文字。 ' + MOBILE_HTML_RULES);
-    if (STYLE_HINT[o.style]) out.push(STYLE_HINT[o.style]);
+    out.push(instr('shell') + ' ' + instr('htmlRules'));
+    if (styleHint(o.style)) out.push(styleHint(o.style));
     out.push(titleLine);
   } else if (kind === 'fill') {
     lines.push(`【骨架】页面骨架已经定稿，下面是它的文字脉络，[[编号]] 就是要你填的位置：\n${phase.outline}`);
     lines.push(`【占位清单】\n${phase.slots.map(x => `[[${x.n}]] ${x.hint || '正文'}`).join('\n')}`);
-    out.push('只输出各占位的文字。格式严格：每段以单独一行 [[编号]] 开头，从下一行起是该处的文字，可用 <br> 换行，不要任何其它 HTML、不要 markdown、不要解释；每个编号都要给到，按编号顺序，不要多不要少。');
-    if (len) out.push(`全部占位的文字合计约 ${len.chars} 字。`);
+    out.push(instr('fill'));
+    if (len) out.push(instr('fillLength', { 字数: len.chars }));
   } else {
-    if (o.mode === 'html') out.push('整体输出为一段 HTML（不要 markdown 围栏、不要任何 HTML 之外的说明文字）。' + (prompts.some(p => (p.tags || []).includes('前端')) ? '' : ' ' + MOBILE_HTML_RULES));
-    else if (o.mode === 'mixed') out.push('允许 HTML 与纯文字混排：HTML 部分用 ```html 围栏包裹，文字部分直接写；两者之间空一行。 ' + MOBILE_HTML_RULES);
-    else out.push('只输出纯文字正文，不要 HTML、不要 markdown 标题、不要代码块。');
-    if (len) out.push(`篇幅约 ${len.chars} 字（HTML 里只算可见文字）。`);
-    if (o.wrapTag) out.push(`把全部输出包在 <${o.wrapTag}></${o.wrapTag}> 标签内，标签外不要有任何内容。`);
-    if (o.mode !== 'text' && STYLE_HINT[o.style]) out.push(STYLE_HINT[o.style]);
+    if (o.mode === 'html') out.push(instr('outHtml') + (prompts.some(p => (p.tags || []).includes('前端')) ? '' : ' ' + instr('htmlRules')));
+    else if (o.mode === 'mixed') out.push(instr('outMixed') + ' ' + instr('htmlRules'));
+    else out.push(instr('outText'));
+    if (len) out.push(instr('length', { 字数: len.chars }));
+    if (o.wrapTag) out.push(instr('wrap', { 标签: o.wrapTag }));
+    if (o.mode !== 'text' && styleHint(o.style)) out.push(styleHint(o.style));
     out.push(titleLine);
   }
   lines.push(`【输出要求】${out.join(' ')}`);
@@ -196,10 +195,12 @@ export function postProcess(raw, combo) {
 
 // ── 选组合 ──
 export function aiPickCombo() {
-  const forms = state.prompts.filter(p => (p.tags || []).includes('形式'));
+  // 菜单用带「形式」标签的提示词；一条都没有就用全部提示词
+  const tagged = state.prompts.filter(p => (p.tags || []).includes('形式'));
+  const forms = tagged.length ? tagged : state.prompts;
   const menu = forms.map((p, i) => `${i + 1}. ${p.title}：${p.content.replace(/\s+/g, ' ').slice(0, 80)}…`).join('\n');
   const scenes = state.prompts.filter(p => (p.tags || []).includes('场景')).map(p => p.title).join(' / ');
-  const picker = { id: '', title: 'AI 自选', content: `从下面的形式里自选一种最适合当前关系与最近发生的事的，严格按那一条的形式要求写；场景可从「${scenes || '任意'}」里挑，也可以自创。\n${menu}\n先在标题行之后用一行注明「形式：xxx」。` };
+  const picker = { id: '', title: 'AI 自选', content: instr('aiPick', { 场景: scenes || '任意', 菜单: menu }) };
   return {
     id: '', name: 'AI 自选', tags: ['随机'], preambleId: state.settings.defaultPreambleId || (state.preambles[0] || {}).id,
     promptIds: [], _virtualPrompts: [picker],
@@ -240,8 +241,14 @@ async function generateOnce(comboIn, opts = {}) {
   const pre = comboPreamble(combo);
   const preamble = pre ? expand(pre.content, mctx) : '只输出 <Brief> 要求的内容。';
   const target = resolveTarget(combo.api);
-  // 「走酒馆预设」只对「跟随酒馆当前 API」有效；材料由酒馆自己拼，这里不再重复带
-  const quiet = combo.channel === 'preset' && target === 'st';
+  // 「走酒馆预设」只对「跟随酒馆当前 API」有效；材料由酒馆自己拼，这里不再重复带。
+  // 酒馆拼的时候总是带整段聊天，没法截到某一楼，所以在更早的楼层下出时改用插件自己拼
+  const olderFloor = opts.uptoIndex != null && opts.uptoIndex < (ctx().chat || []).length - 1;
+  const wantPreset = combo.channel === 'preset';
+  const quiet = wantPreset && target === 'st' && !olderFloor;
+  const channelNote = !wantPreset ? '' : quiet ? '走酒馆预设'
+    : target !== 'st' ? '插件自己拼（出口不是「跟随酒馆当前 API」，走不了酒馆预设）'
+    : '插件自己拼（在更早的楼层下出，酒馆预设会带上之后的聊天，所以没走预设）';
   const wantStream = !!opts.onStream && state.settings.streamPreview !== false;
   const cancelled = () => !!signal?.aborted;
 
@@ -271,7 +278,7 @@ async function generateOnce(comboIn, opts = {}) {
   };
   const base = {
     id: uid('r'), characterName: mat.charName,
-    createdAt: new Date().toISOString(), comboCopy: combo, target, request: sent,
+    createdAt: new Date().toISOString(), comboCopy: combo, target, request: sent, ...(channelNote ? { channelNote } : {}),
   };
 
   const o = combo.output || {};
@@ -308,7 +315,7 @@ async function generateOnce(comboIn, opts = {}) {
 /** 交互型 HTML 里点了带 data-action 的按钮：带着上一篇和选择再写一篇 */
 export function continueExtra(result, choice) {
   const prev = segmentsOf(result).map(s => (s.type === 'text' ? s.content : plain(s.content))).join('\n\n').slice(0, 6000);
-  return `上一篇正文：\n${prev}\n\n用户在上一篇里选择了「${choice}」，接着这个选择往下写新的一篇。`;
+  return instr('continue', { 上一篇: prev, 选择: choice });
 }
 
 export function segmentsOf(result) {

@@ -22,6 +22,8 @@ export function resolveCombo(c) {
     ...c,
     context: c.context && typeof c.context === 'object' ? c.context : globalContext(),
     who: WHO_LABEL[c.who] ? c.who : globalWho(),
+    // 身份跟随全局、全局是自定身份时，小剧场自己没写身份就用全局写的
+    whoText: !WHO_LABEL[c.who] && globalWho() === 'custom' && !String(c.whoText || '').trim() ? (state.settings.defaultWhoText || '') : c.whoText,
     channel: CHANNEL_LABEL[c.channel] ? c.channel : globalChannel(),
     writeBack: typeof c.writeBack === 'boolean' ? c.writeBack : globalWriteBack(),
     output: { ...o, style: STYLE_LABEL[o.style] ? o.style : globalStyle(), staged: typeof o.staged === 'boolean' ? o.staged : globalStaged() },

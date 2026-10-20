@@ -774,3 +774,5 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
     [data-xjc-theme=script] .xjc-sheet { border-radius: 0; }
 }
 .xjc-temp { display: inline-block; vertical-align: 2px; margin-right: 6px; padding: 0 6px; border: 1px solid var(--xjc-ui-acc); border-radius: 99px; color: var(--xjc-ui-acc); font-size: .7em; font-weight: 400; }
+.xjc-field .lb .xjc-temp { margin-left: 4px; }
+.xjc-instr-reset { float: right; margin-top: -4px; }

@@ -130,6 +130,7 @@ export function snapshotInfo(result) {
   row('随机', (s.randoms || []).join('、'));
   row('输出', `${KIND_LABEL[kindOf(result)]} · 篇幅 ${s.length || '不限'}${s.staged ? ' · 分两步' : ''}`);
   row('上下文', contextLabel(s.context));
+  row('通道', result.channelNote);
   row('身份', s.who === 'custom' ? '自定身份' : s.who === 'none' ? '旁观' : '用户人设');
   row('出口', `${targetLabel(result.target)}${result.model ? ' · ' + result.model : ''}`);
   if (s.extra) row('追加', s.extra.length > 120 ? s.extra.slice(0, 120) + '…' : s.extra);
