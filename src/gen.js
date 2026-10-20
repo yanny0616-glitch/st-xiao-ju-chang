@@ -51,10 +51,9 @@ function expand(text, mctx) {
   const ours = expandMacros(text, mctx);
   try { return ctx().substituteParams(ours, mctx.user, mctx.char); } catch { return ours; }
 }
-function drawRandoms(combo) {
+/** 这个小剧场的随机规则下，可能抽到的全部条目（舞台上「这次指定」也列这些） */
+export function randomCandidates(combo) {
   const rule = combo.random || {};
-  const n = Math.max(0, Number(rule.count) || 0);
-  if (!n) return [];
   const inc = new Set(rule.include || []), exc = new Set(rule.exclude || []);
   const deps = combo._dependencies;
   const randoms = deps ? deps.randoms : state.randoms;
@@ -75,7 +74,12 @@ function drawRandoms(combo) {
     return !inc.size || tags.some(t => inc.has(t));
   });
   if (!pool.length) pool = source.filter(r => !(r.tags || []).some(t => exc.has(t)));
-  return shuffle(pool).slice(0, n);
+  return pool;
+}
+function drawRandoms(combo) {
+  const n = Math.max(0, Number(combo.random?.count) || 0);
+  if (!n) return [];
+  return shuffle(randomCandidates(combo)).slice(0, n);
 }
 
 /** <Brief> 全文 + 这次用了什么 */
@@ -123,7 +127,7 @@ function buildTasks(combo, extra, charName, phase = null) {
     tasks: lines.join('\n'), randoms,
     snapshot: {
       comboId: combo.id || '', comboName: combo.name, preambleName: (comboPreamble(combo) || {}).name || '',
-      prompts: prompts.map(p => p.title), randoms: randoms.map(r => r.title), who, output: { ...o },
+      prompts: prompts.map(p => p.title), randoms: randoms.map(r => r.title), randomsForced: !!phase?.forced, who, output: { ...o },
       length: len ? `${len.label} · 约 ${len.chars} 字` : '不限',
       context: { chat: ctxOpt.chat || 'none', rounds: ctxOpt.rounds || 12, worldInfo: ctxOpt.worldInfo !== false, summary: ctxOpt.summary !== false },
       extra: extra || '', staged: kind === 'shell',
@@ -248,6 +252,11 @@ export async function generateTheater(comboIn, opts = {}) {
 
 async function generateOnce(comboIn, opts = {}) {
   const combo = captureCombo(comboIn);
+  // 舞台上「这次指定」的随机条目：只管这一次，不存进 comboCopy（「按这套再来」照常随机）
+  delete combo._forcedRandomIds;
+  const forcedIds = comboIn._forcedRandomIds || [];
+  const forced = forcedIds.length ? forcedIds.map(id => randomCandidates(combo).find(x => x.id === id)).filter(Boolean) : [];
+  const force = forced.length ? { randoms: forced, forced: true } : {};
   const signal = opts.signal;
   const ctxOpt = combo.context || { chat: 'recent', rounds: 12 };
   const mat = await buildMaterials({ context: ctxOpt, who: combo.who, uptoIndex: opts.uptoIndex });
@@ -297,7 +306,7 @@ async function generateOnce(comboIn, opts = {}) {
 
   const o = combo.output || {};
   if (o.staged && o.mode === 'html') {
-    const shellTask = buildTasks(combo, opts.extra, mat.charName, { kind: 'shell' });
+    const shellTask = buildTasks(combo, opts.extra, mat.charName, { ...force, kind: 'shell' });
     const shell = await call(shellTask.tasks, 'shell');
     if (cancelled()) return null;
     if (!shell.text.trim()) throw new Error('模型没有返回骨架。');
@@ -308,7 +317,7 @@ async function generateOnce(comboIn, opts = {}) {
     if (!seg || !found.slots.length) return { ...base, raw: shell.text, title: parsed.title, segments: parsed.segments, snapshot: { ...shellTask.snapshot, staged: false }, model: shell.model };
     const shellResult = { ...base, raw: shell.text, title: parsed.title, segments: parsed.segments, snapshot: shellTask.snapshot, model: shell.model, pending: true };
     opts.onShell?.(shellResult);
-    const fillTask = buildTasks(combo, opts.extra, mat.charName, { kind: 'fill', randoms: shellTask.randoms, slots: found.slots, outline: found.outline });
+    const fillTask = buildTasks(combo, opts.extra, mat.charName, { kind: 'fill', randoms: shellTask.randoms, forced: !!force.forced, slots: found.slots, outline: found.outline });
     let fill;
     try { fill = await call(fillTask.tasks, 'fill'); }
     catch (e) { e.shellResult = shellResult; throw e; }
@@ -318,7 +327,7 @@ async function generateOnce(comboIn, opts = {}) {
     const segments = parsed.segments.map(x => (x === seg ? { type: 'html', content: fillSlots(seg.content, map) } : x));
     return { ...shellResult, pending: false, raw: `${shell.text}\n\n<!-- 填字 -->\n${fill.text}`, segments, model: shell.model || fill.model };
   }
-  const { tasks, snapshot } = buildTasks(combo, opts.extra, mat.charName);
+  const { tasks, snapshot } = buildTasks(combo, opts.extra, mat.charName, forced.length ? force : null);
   const { text, model } = await call(tasks, 'text');
   if (cancelled()) return null;
   if (!text.trim()) throw new Error('模型没有返回内容。');

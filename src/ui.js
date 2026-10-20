@@ -127,7 +127,7 @@ export function snapshotInfo(result) {
   row('小剧场', s.comboName);
   row('前置', s.preambleName);
   row('提示词', (s.prompts || []).join('、'));
-  row('随机', (s.randoms || []).join('、'));
+  row(s.randomsForced ? '随机（这次指定）' : '随机', (s.randoms || []).join('、'));
   row('输出', `${KIND_LABEL[kindOf(result)]} · 篇幅 ${s.length || '不限'}${s.staged ? ' · 分两步' : ''}`);
   row('上下文', contextLabel(s.context));
   row('通道', result.channelNote);

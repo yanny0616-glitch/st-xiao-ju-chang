@@ -225,6 +225,42 @@ async function desktop(browser) {
   const after3c = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.id === s.settings.currentComboId); return { n: s.combos.length, ids: c?.promptIds?.length }; });
   ok(after3c.n === nCombos + 1 && after3c.ids === 2 && !(await page.textContent('.xjc-combo-card .nm')).includes('临时'), '「存成小剧场」存进库并放到舞台');
 
+  // 3c2. 舞台上「这次抽」：带随机的小剧场可以指定这次用哪几条；「直接用提示词」能选前置要求
+  const pickTitle = await page.evaluate(async () => {
+    const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
+    const c = s.state.combos.find(x => x.id === 'c_store');
+    c.random = { count: 1, include: [], exclude: [], groups: [] };
+    await s.save('combos');
+    await s.setSetting({ currentComboId: 'c_store', stagePick: null });
+    window.XiaoJuChang.open('stage');
+    return s.state.randoms[2].title;
+  });
+  ok((await page.textContent('.xjc-combo-card .xjc-pickrow')).includes('随机 1 条'), '带随机的小剧场，舞台卡片上有「这次抽：随机」');
+  await page.click('.xjc-combo-card .xjc-pickrow .xjc-btn:has-text("指定")');
+  await page.click(`.xjc-sheet .xjc-item:has(.t:text-is("${pickTitle}"))`);
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("用这 1 条")');
+  ok((await page.textContent('.xjc-combo-card .xjc-pickrow')).includes(pickTitle), '指定后卡片上显示这次用的条目');
+  await page.click('.xjc-actions .pri');
+  await waitResult(page);
+  const pickSnap = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; return { snap: s.recent[0].snapshot, copy: '_forcedRandomIds' in (s.recent[0].comboCopy || {}) }; });
+  ok(pickSnap.snap.randoms.length === 1 && pickSnap.snap.randoms[0] === pickTitle && pickSnap.snap.randomsForced && !pickSnap.copy, `这次用的是指定的那条（${pickSnap.snap.randoms}），「按这套再来」不会沿用指定`);
+  await page.click('.xjc-combo-card .xjc-pickrow .xjc-btn:has-text("改回随机")');
+  ok((await page.textContent('.xjc-combo-card .xjc-pickrow')).includes('随机 1 条'), '「改回随机」恢复随机抽');
+  await page.evaluate(async () => { const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js'); const c = s.state.combos.find(x => x.id === 'c_store'); c.random = { count: 0, include: [], exclude: [], groups: [] }; await s.save('combos'); });
+  // 选一条不是默认的前置要求
+  const preName = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; return s.preambles.find(p => p.id !== (s.settings.defaultPreambleId || s.preambles[0].id)).name; });
+  await page.evaluate(() => window.XiaoJuChang.open('stage'));
+  await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
+  await page.click('.xjc-sheet .xjc-seg button:has-text("直接用提示词")');
+  await page.selectOption('.xjc-sheet .xjc-field:has(> .lb:text-is("前置要求")) select', { label: preName });
+  await page.locator('.xjc-sheet .xjc-item').first().click();
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("用这 1 条")');
+  ok((await page.textContent('.xjc-combo-card .xjc-chips')).includes(preName), `「直接用提示词」能选前置要求（${preName}）`);
+  await page.click('.xjc-actions .pri');
+  await waitResult(page);
+  ok(await page.evaluate(async n => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0].snapshot.preambleName === n, preName), '选的前置要求用在了这次生成');
+  await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).setSetting({ currentComboId: 'c_store' }));
+
   // 3e. 分组：提示词放进分组，库里按组显示、可折叠；选提示词能整组加入；随机能只从某个组里抽
   await page.evaluate(async () => {
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');

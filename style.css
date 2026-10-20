@@ -792,3 +792,7 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
 .xjc-grp-hd b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xjc-grp-hd .n { font-size: .8em; opacity: .55; }
 .xjc-grp > .xjc-list { margin-top: 6px; }
+/* 舞台卡片：这次抽 */
+.xjc-pickrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--xjc-ui-line); font-size: .88em; }
+.xjc-pickrow .lb { opacity: .6; flex: none; }
+.xjc-pickrow .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
