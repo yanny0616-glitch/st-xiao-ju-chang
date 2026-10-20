@@ -25,7 +25,7 @@ async function setupData(page) {
     const h = c.getRequestHeaders();
     const world = {
       entries: {
-        0: { uid: 0, key: [], keysecondary: [], comment: '雨城常驻', content: '雨城一年有两百天在下雨，老城区的路灯是黄色的。', constant: true, selective: false, order: 100, position: 0, disable: false, probability: 100, useProbability: true },
+        0: { uid: 0, key: [], keysecondary: [], comment: '雨城常驻', content: '雨城一年有两百天在下雨，老城区的路灯是黄色的。<char>总说<USER>是唯一不嫌雨烦的人，{{char}}会去{{user}}家楼下等。', constant: true, selective: false, order: 100, position: 0, disable: false, probability: 100, useProbability: true },
         1: { uid: 1, key: ['便利店'], keysecondary: [], comment: '便利店', content: '街角的便利店叫「晴天」，店员阿哲总在打瞌睡。', constant: false, selective: false, order: 100, position: 0, disable: false, probability: 100, useProbability: true },
       },
     };
@@ -45,7 +45,7 @@ async function setupData(page) {
       const fd = new FormData();
       fd.append('ch_name', '林晚');
       fd.append('description', '林晚是{{user}}楼下的邻居，开夜班出租车，车里永远放着一把多余的伞。');
-      fd.append('personality', '嘴硬心软，不爱解释');
+      fd.append('personality', '嘴硬心软，不爱解释，只对<user>例外');
       fd.append('scenario', '雨季的老城区');
       fd.append('first_mes', '你又没带伞？');
       fd.append('world', '雨城');
@@ -95,14 +95,19 @@ async function desktop(browser) {
   page.on('console', m => { if (m.type() === 'error' && /小剧场|xjc|xiao-ju/.test(m.text())) errors.push(m.text()); });
   await boot(page);
   await setupData(page);
+  await page.evaluate(() => window.XiaoJuChang.open('stage'));
+  await page.waitForSelector('.xjc-root:not([hidden]) .xjc-actions');
+  const noChat = await page.evaluate(() => ({ notice: !!document.querySelector('.xjc-stage-notice .xjc-cast'), disabled: document.querySelector('.xjc-actions .pri').disabled }));
+  ok(noChat.notice && noChat.disabled, '没打开角色聊天时提示并禁用生成');
+  await page.evaluate(() => window.XiaoJuChang.close());
   await openChar(page);
   await sendChat(page, '今天又下雨了，我在便利店门口躲雨。');
 
   // 1. 打开面板，默认组合（文字 + theater 包裹），跟随酒馆 API
   await page.click('#extensionsMenuButton').catch(() => {});
   await page.click('#xjc_wand');
-  await page.waitForSelector('.xjc-root:not([hidden]) .xjc-cast');
-  ok((await page.textContent('.xjc-cast')).includes('林晚'), '主演是当前聊天的角色');
+  await page.waitForSelector('.xjc-root:not([hidden]) .xjc-combo-card');
+  ok(await page.locator('.xjc-stage-notice .xjc-cast').count() === 0, '打开了角色聊天时不显示提示');
   await page.screenshot({ path: `${SHOTS}/d-01-stage.png` });
   await page.click('.xjc-actions .pri');
   await waitResult(page);
@@ -118,6 +123,16 @@ async function desktop(browser) {
   ok(sys.includes('<RecentChat>') && sys.includes('躲雨'), '材料带最近聊天');
   ok(call1.messages[2].content.startsWith('<Brief>') && call1.messages[2].content.includes('深夜便利店'), 'Brief 带提示词');
   ok(!/\{\{(user|char)\}\}/.test(JSON.stringify(call1.messages)), '宏全部展开');
+  ok(/林晚/.test(call1.messages[2].content), '{{char}} 展开成当前聊天的角色');
+  const userName = await page.evaluate(() => SillyTavern.getContext().name1);
+  ok(sys.includes(`林晚总说${userName}是唯一不嫌雨烦的人，林晚会去${userName}家楼下等`), '世界书里的 <char> <USER> {{char}} {{user}} 都换成名字');
+  ok(sys.includes(`只对${userName}例外`), '角色卡里的 <user> 换成名字');
+  ok(!/<(user|char|bot)>/i.test(JSON.stringify(call1.messages)), '没有残留 <user> <char> <bot>');
+  const exp = await page.evaluate(async () => {
+    const m = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/macros.js');
+    return m.expandMacros('<user>和<Char>、<BOT>，{{user}}和{{char}}', { user: '我', char: '林晚', macros: [] });
+  });
+  ok(exp === '我和林晚、林晚，我和林晚', `提示词里的两种写法都展开（${exp}）`);
   ok(call1.max_tokens >= 4096 || call1.max_tokens === undefined || call1.max_tokens > 300, `跟随酒馆时用插件的长度（${call1.max_tokens}）`);
   await page.screenshot({ path: `${SHOTS}/d-02-result-text.png` });
 
@@ -269,7 +284,7 @@ async function mobile(browser) {
   // 模拟 iPhone 刘海 / 底部横条的安全区
   await page.addStyleTag({ content: ':root{--tt-inset-top:59px;--tt-inset-bottom:34px}' });
   await page.evaluate(() => window.XiaoJuChang.open('stage'));
-  await page.waitForSelector('.xjc-root:not([hidden]) .xjc-cast');
+  await page.waitForSelector('.xjc-root:not([hidden]) .xjc-combo-card');
   const box = await page.$eval('.xjc-panel', n => { const r = n.getBoundingClientRect(); return { w: r.width, h: r.height }; });
   ok(box.w === 393 && box.h === 852, `手机上面板铺满（${box.w}×${box.h}）`);
   const hdTop = await page.$eval('.xjc-hd', n => n.getBoundingClientRect().top);

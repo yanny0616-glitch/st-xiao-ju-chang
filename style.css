@@ -102,10 +102,7 @@
 
 /* ── 舞台 ── */
 .xjc-cast { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--xjc-ui-line); border-radius: 12px; background: var(--xjc-ui-chat); }
-.xjc-ava { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; flex: none; background: var(--xjc-ui-line); }
-.xjc-cast .nm { font-weight: 600; }
-.xjc-cast .sub { font-size: .8em; opacity: .6; }
-.xjc-combo-pick { margin-top: 14px; }
+.xjc-stage-notice:not(:empty) { margin-bottom: 14px; }
 .xjc-combo-card { border: 1px solid var(--xjc-ui-line); border-radius: 12px; padding: 12px; margin-top: 10px; }
 .xjc-combo-card .nm { font-weight: 700; font-size: 1.05em; margin-bottom: 8px; }
 .xjc-extra { margin-top: 10px; }
@@ -135,7 +132,6 @@
 .xjc-item:hover { border-color: var(--xjc-ui-acc); }
 .xjc-item .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xjc-item .d { font-size: .8em; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.xjc-item .ava-s { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; }
 .xjc-item .end { flex: none; font-size: .78em; opacity: .55; }
 
 /* ── 编辑抽屉 ── */

@@ -218,14 +218,14 @@ export function weightedRandomCombo() {
 }
 
 /**
- * 主入口。opts: { chid, extra, uptoIndex, signal, onStream({kind,text,fill}), onShell(result) }
+ * 主入口。opts: { extra, uptoIndex, signal, onStream({kind,text,fill}), onShell(result) }
  * 返回结果对象（可直接存进最近/收藏/消息），取消时返回 null
  */
 export async function generateTheater(comboIn, opts = {}) {
   const combo = captureCombo(comboIn);
   const signal = opts.signal;
   const ctxOpt = combo.context || { chat: 'recent', rounds: 12 };
-  const mat = await buildMaterials({ chid: opts.chid, context: ctxOpt, who: combo.who, uptoIndex: opts.uptoIndex });
+  const mat = await buildMaterials({ context: ctxOpt, who: combo.who, uptoIndex: opts.uptoIndex });
   const mctx = macroCtx(combo, mat.charName);
   const pre = comboPreamble(combo);
   const preamble = pre ? expand(pre.content, mctx) : '只输出 <Brief> 要求的内容。';
@@ -247,7 +247,7 @@ export async function generateTheater(comboIn, opts = {}) {
     return callModel(messages, { target, onChunk, signal });
   };
   const base = {
-    id: uid('r'), chid: opts.chid, characterName: mat.charName, characterAvatar: ctx().characters[opts.chid]?.avatar || '',
+    id: uid('r'), characterName: mat.charName,
     createdAt: new Date().toISOString(), comboCopy: combo, target,
   };
 

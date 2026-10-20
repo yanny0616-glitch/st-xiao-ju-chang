@@ -3,34 +3,22 @@ import { ctx } from './util.js';
 import { state } from './store.js';
 
 // ── 角色 ──
-/** 当前聊天能当主演的角色：单聊就是这个角色，群聊是所有成员 */
-export function castOfChat() {
+/** 当前聊天的角色（{{char}}）；没打开角色聊天或在群聊里返回 null */
+export function currentChar() {
   const c = ctx();
-  if (c.groupId) {
-    const group = (c.groups || []).find(g => g.id === c.groupId);
-    if (!group) return [];
-    return (group.members || []).map(avatar => {
-      const chid = c.characters.findIndex(ch => ch.avatar === avatar);
-      return chid >= 0 ? { chid, name: c.characters[chid].name, avatar } : null;
-    }).filter(Boolean);
-  }
+  if (c.groupId) return null;
   const chid = c.characterId;
-  if (chid === undefined || chid === null || chid === '' || !c.characters[chid]) return [];
-  return [{ chid: Number(chid), name: c.characters[chid].name, avatar: c.characters[chid].avatar }];
-}
-export function chatKey() {
-  const c = ctx();
-  return c.groupId ? `g:${c.groupId}` : (c.characterId != null && c.characters[c.characterId] ? `c:${c.characters[c.characterId].avatar}` : '');
-}
-export function avatarUrl(avatar) {
-  return avatar ? `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}` : '';
+  if (chid === undefined || chid === null || chid === '' || !c.characters[chid]) return null;
+  return { chid: Number(chid), name: c.characters[chid].name };
 }
 export const userName = () => ctx().name1 || '用户';
 
 // ── 材料 ──
+/** 角色卡、人设、世界书、总结里的 {{user}} {{char}} <user> <char> 等交给酒馆替换；老写法先自己换一遍，不依赖酒馆版本 */
 function sub(text, charName) {
   const c = ctx();
-  try { return c.substituteParams(String(text || ''), c.name1, charName); } catch { return String(text || ''); }
+  const t = String(text || '').replace(/<user>/gi, c.name1 || '用户').replace(/<(?:char|bot)>/gi, charName);
+  try { return c.substituteParams(t, c.name1, charName); } catch { return t; }
 }
 function cleanMes(m) {
   return String(m.mes || '').replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '').trim();
@@ -49,11 +37,12 @@ export function recentChat(rounds, uptoIndex) {
   return out;
 }
 
-/** 拼一段 system 材料。opts: { chid, context, who, uptoIndex } */
-export async function buildMaterials({ chid, context = {}, who = 'persona', uptoIndex }) {
+/** 拼一段 system 材料。opts: { context, who, uptoIndex } */
+export async function buildMaterials({ context = {}, who = 'persona', uptoIndex }) {
   const c = ctx();
-  const ch = c.characters[chid];
-  if (!ch) throw new Error('找不到这个角色，先打开一个角色聊天。');
+  const cur = currentChar();
+  if (!cur) throw new Error('先打开一个角色聊天。');
+  const ch = c.characters[cur.chid];
   const name = ch.name;
   const parts = [];
   const card = [`角色：${name}`];
@@ -77,13 +66,13 @@ export async function buildMaterials({ chid, context = {}, who = 'persona', upto
       const scan = (history.length ? history : recentChat(4, uptoIndex)).map(m => `${m.name}: ${m.text}`).reverse();
       const wi = await c.getWorldInfoPrompt(scan, c.maxContext || 8192, true);
       const text = [wi?.worldInfoBefore, wi?.worldInfoAfter].filter(s => s && s.trim()).join('\n');
-      if (text) parts.push(`<WorldInfo>\n${text.trim()}\n</WorldInfo>`);
+      if (text) parts.push(`<WorldInfo>\n${sub(text.trim(), name)}\n</WorldInfo>`);
     } catch (e) { console.warn('[小剧场] 世界书读取失败', e); }
   }
 
   if (context.summary !== false) {
     const summary = c.extensionPrompts?.['1_memory']?.value;
-    if (summary && summary.trim()) parts.push(`<Summary>\n${summary.trim()}\n</Summary>`);
+    if (summary && summary.trim()) parts.push(`<Summary>\n${sub(summary.trim(), name)}\n</Summary>`);
   }
 
   if (history.length) {

@@ -5,7 +5,7 @@ import { state } from './store.js';
 import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, resultPlainText, KIND_LABEL, kindOf } from './gen.js';
 import { mountFrame } from './frame.js';
 import { openViewer } from './ui.js';
-import { castOfChat } from './host.js';
+import { currentChar } from './host.js';
 import { isFavorite, toggleFavorite } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
@@ -18,16 +18,6 @@ function slim(result) {
   const copy = comboCopy ? { ...comboCopy } : null;
   if (copy) delete copy._dependencies;
   return { ...rest, comboCopy: copy };
-}
-function messageChid(m) {
-  const c = ctx();
-  const cast = castOfChat();
-  if (!cast.length) return null;
-  if (!m.is_user && c.groupId) {
-    const hit = cast.find(x => x.avatar === m.original_avatar) || cast.find(x => x.name === m.name);
-    if (hit) return hit.chid;
-  }
-  return cast[0].chid;
 }
 async function pushTheater(msg, result) {
   const c = ctx();
@@ -47,7 +37,7 @@ async function pushTheater(msg, result) {
 /** 面板里的「挂到聊天」：挂到最新一条 AI 回复（没有就最新一条消息） */
 export async function attachToLatest(result) {
   const c = ctx();
-  if (!castOfChat().some(x => x.chid === result.chid)) throw new Error('这篇的角色不在当前聊天里。');
+  if (!currentChar()) throw new Error('先打开一个角色聊天。');
   let idx = -1;
   for (let i = c.chat.length - 1; i >= 0; i--) {
     const m = c.chat[i];
@@ -70,8 +60,7 @@ export async function generateFor(mesId, { combo, extra } = {}) {
   const msg = c.chat[mesId];
   if (!msg || msg.is_system) return;
   if (running.has(msg)) { toast('这条下面的小剧场还在写'); return; }
-  const chid = messageChid(msg);
-  if (chid == null) { toast('先打开一个角色聊天'); return; }
+  if (!currentChar()) { toast('先打开一个角色聊天'); return; }
   const use = combo || pickCombo();
   if (!use) { toast('还没有小剧场，先在面板的「库」里建一个'); return; }
   const ctrl = new AbortController();
@@ -79,7 +68,7 @@ export async function generateFor(mesId, { combo, extra } = {}) {
   renderTail(mesId);
   const tail = '【接在聊天后面】这一篇挂在刚才这条消息下面，内容要和这条消息里刚发生的事有关，可以是它的番外、旁观视角或另一种呈现，但不要复述原文。';
   try {
-    const result = await generateTheater(use, { chid, uptoIndex: mesId, extra: [tail, extra].filter(Boolean).join('\n'), signal: ctrl.signal });
+    const result = await generateTheater(use, { uptoIndex: mesId, extra: [tail, extra].filter(Boolean).join('\n'), signal: ctrl.signal });
     if (!result || ctrl.signal.aborted) return;
     running.delete(msg);
     await pushTheater(msg, result);

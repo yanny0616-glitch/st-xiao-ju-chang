@@ -123,7 +123,6 @@ export function snapshotInfo(result) {
   const s = result.snapshot || {};
   const dl = el('dl', 'xjc-kv');
   const row = (k, v) => { if (!v) return; dl.append(el('dt', '', k), el('dd', '', v)); };
-  row('角色', result.characterName);
   row('小剧场', s.comboName);
   row('前置', s.preambleName);
   row('提示词', (s.prompts || []).join('、'));

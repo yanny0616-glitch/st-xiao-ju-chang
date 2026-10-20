@@ -5,11 +5,12 @@ function shuffle(list) { const a = [...list]; for (let i = a.length - 1; i > 0; 
 
 /**
  * ctx: { user, char, length, macros:[{name,kind,values|min,max}] }
- * 支持：{{user}} {{char}} {{time}} {{date}} {{weekday}} {{篇幅}} {{random::a::b}} {{random:a,b}}
+ * 支持：{{user}} {{char}} <user> <char> <bot> {{time}} {{date}} {{weekday}} {{篇幅}} {{random::a::b}} {{random:a,b}}
  *      {{随机词:名字}} {{随机词:名字:数量}} {{随机数:名字}} {{roll:1d6}}
  */
 function expandMacros(text, ctx) {
-  let out = String(text ?? "");
+  // 酒馆的老写法 <user> <char> <bot>，大小写都认
+  let out = String(text ?? "").replace(/<user>/gi, ctx.user || "用户").replace(/<(?:char|bot)>/gi, ctx.char || "角色");
   for (let pass = 0; pass < 3 && /\{\{/.test(out); pass++) {
     out = out.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, body) => {
       const b = body.trim();

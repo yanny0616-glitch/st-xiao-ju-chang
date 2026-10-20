@@ -2,7 +2,7 @@
 import { ctx, el, btn, esc, uid, clone, byId, toast, fail, fmtTime, copyText, saveFile, pickFile } from './util.js';
 import { state, save, setSetting, upsert, remove, seedDefaults, saveAll, backendName } from './store.js';
 import { DEFAULT_SETTINGS, LENGTH_LABEL } from './defaults.js';
-import { castOfChat, avatarUrl, apiTargets, targetLabel, resolveTarget, API_FORMATS, fetchModels, callModel } from './host.js';
+import { currentChar, apiTargets, targetLabel, resolveTarget, API_FORMATS, fetchModels, callModel } from './host.js';
 import {
   generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, segmentsOf, kindOf, KIND_LABEL, charCount,
   resultPlainText, contextLabel, postProcess,
@@ -17,8 +17,7 @@ import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { attachToLatest } from './chat.js';
 
 let root = null, panelEl = null, bodyEl = null;
-let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', favFilter = '', promptFilter = '';
-let selectedChid = null;
+let tab = 'stage', libTab = 'combos', setTab = 'gen', favTab = 'fav', promptFilter = '';
 const views = {};
 const stageBox = {};
 let busy = null, runSeq = 0;
@@ -100,7 +99,7 @@ function switchTab(v) {
 // ── 舞台 ──
 function buildStage() {
   const v = views.stage;
-  for (const k of ['cast', 'pick', 'extra', 'actions', 'result', 'recent']) stageBox[k] = el('div', `xjc-stage-${k}`);
+  for (const k of ['notice', 'pick', 'extra', 'actions', 'result', 'recent']) stageBox[k] = el('div', `xjc-stage-${k}`);
   stageBox.actions.className = 'xjc-actions';
   const extra = input('', '加一句这次的要求（可空），比如：下雨天、写得甜一点');
   stageBox.extraInput = extra;
@@ -115,52 +114,25 @@ function buildStage() {
   stageBox.aiBtn = btn('AI 自选', () => run(aiPickCombo(), stageBox.extraInput.value.trim()), 'xjc-btn');
   stageBox.rndBtn.insertAdjacentHTML('afterbegin', '<i class="fa-solid fa-dice"></i>');
   stageBox.actions.append(stageBox.genBtn, stageBox.rndBtn, stageBox.aiBtn);
-  v.append(stageBox.cast, stageBox.pick, stageBox.extra, stageBox.actions, stageBox.result, stageBox.recent);
+  v.append(stageBox.notice, stageBox.pick, stageBox.extra, stageBox.actions, stageBox.result, stageBox.recent);
 }
 
 function currentCombo() { return byId(state.combos, state.settings.currentComboId) || state.combos[0] || null; }
-function currentChid() {
-  const cast = castOfChat();
-  if (!cast.length) return null;
-  if (!cast.some(c => c.chid === selectedChid)) selectedChid = cast[0].chid;
-  return selectedChid;
-}
-
 function renderStage() {
-  renderCast();
+  renderNotice();
   renderPick();
   renderRecent();
   updateBusyButtons();
   if (current && !stageBox.result.children.length) showResult(current.result);
 }
 
-function renderCast() {
-  const box = stageBox.cast;
+/** 没打开角色聊天（或在群聊里）时提示一下；平时什么都不显示 */
+function renderNotice() {
+  const box = stageBox.notice;
   box.innerHTML = '';
-  const cast = castOfChat();
+  if (currentChar()) return;
   const card = el('div', 'xjc-cast');
-  if (!cast.length) {
-    card.appendChild(el('div', 'xjc-grow', '先打开一个角色聊天。小剧场用这个聊天的角色卡、世界书和聊天记录来演。'));
-    box.appendChild(card);
-    return;
-  }
-  const chid = currentChid();
-  const who = cast.find(c => c.chid === chid);
-  const img = el('img', 'xjc-ava');
-  img.src = avatarUrl(who.avatar);
-  img.alt = '';
-  img.onerror = () => { img.style.visibility = 'hidden'; };
-  const info = el('div', 'xjc-grow');
-  info.appendChild(el('div', 'nm', who.name));
-  const mine = [...state.recent, ...state.favorites].filter(r => r.characterAvatar === who.avatar);
-  info.appendChild(el('div', 'sub', `主演 · 已演 ${mine.length} 篇${mine.length ? ' · 上次 ' + fmtTime(mine.map(r => r.createdAt).sort().pop()) : ''}`));
-  card.append(img, info);
-  if (cast.length > 1) {
-    const s = select(cast.map(c => ({ v: String(c.chid), l: c.name })), String(chid));
-    s.style.width = 'auto';
-    s.onchange = () => { selectedChid = Number(s.value); renderCast(); };
-    card.appendChild(s);
-  }
+  card.appendChild(el('div', 'xjc-grow', ctx().groupId ? '小剧场不支持群聊，切到一个角色聊天再来。' : '先打开一个角色聊天。小剧场用这个聊天的角色卡、世界书和聊天记录，提示词里的 {{char}} 就是这个角色。'));
   box.appendChild(card);
 }
 
@@ -179,7 +151,6 @@ function comboChips(c) {
 function renderPick() {
   const box = stageBox.pick;
   box.innerHTML = '';
-  box.className = 'xjc-combo-pick';
   if (!state.combos.length) {
     box.appendChild(el('div', 'xjc-empty', '还没有小剧场，去「库」里建一个。'));
     return;
@@ -213,16 +184,9 @@ function renderRecent() {
 
 function resultItem(r, onClick, endText) {
   const item = el('div', 'xjc-item');
-  if (r.characterAvatar) {
-    const img = el('img', 'ava-s');
-    img.src = avatarUrl(r.characterAvatar);
-    img.alt = '';
-    img.onerror = () => img.remove();
-    item.appendChild(img);
-  }
   const mid = el('div', 'xjc-grow');
   mid.appendChild(el('div', 't', `${isFavorite(r) ? '♥ ' : ''}${r.title || '无题'}`));
-  mid.appendChild(el('div', 'd', `${KIND_LABEL[kindOf(r)]} · ${r.snapshot?.comboName || ''} · ${r.characterName || ''}`));
+  mid.appendChild(el('div', 'd', `${KIND_LABEL[kindOf(r)]} · ${r.snapshot?.comboName || ''}`));
   item.append(mid, el('div', 'end', endText || fmtTime(r.createdAt)));
   item.onclick = onClick;
   return item;
@@ -230,8 +194,8 @@ function resultItem(r, onClick, endText) {
 
 function updateBusyButtons() {
   if (!stageBox.genBtn) return;
-  const noCast = !castOfChat().length;
-  for (const b of [stageBox.genBtn, stageBox.rndBtn, stageBox.aiBtn]) b.disabled = !!busy || noCast;
+  const noChar = !currentChar();
+  for (const b of [stageBox.genBtn, stageBox.rndBtn, stageBox.aiBtn]) b.disabled = !!busy || noChar;
   stageBox.genBtn.textContent = busy ? '正在写…' : '生成一篇';
 }
 
@@ -253,7 +217,7 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
   const frame = mountFrame(wrap, segs, { onAction: pending ? null : text => continueFrom(result, text) });
   if (!pending) {
     const meta = el('div', 'xjc-meta');
-    meta.append(el('span', '', `${result.characterName || ''} · ${fmtTime(result.createdAt)}`), el('span', '', `${charCount(result)} 字${result.model ? ' · ' + result.model : ''}`));
+    meta.append(el('span', '', fmtTime(result.createdAt)), el('span', '', `${charCount(result)} 字${result.model ? ' · ' + result.model : ''}`));
     card.appendChild(meta);
     const ops = el('div', 'xjc-ops');
     ops.appendChild(btn('再来一条', () => again(result), 'xjc-btn'));
@@ -308,13 +272,13 @@ function again(result) {
   const combo = comboOf(result);
   if (!combo) { toast('这篇的配置已经找不到了'); return; }
   open('stage');
-  run(combo, result.snapshot?.extra || '', result.chid);
+  run(combo, result.snapshot?.extra || '');
 }
 function continueFrom(result, text) {
   const combo = comboOf(result);
   if (!combo) { toast('这篇的配置已经找不到了'); return; }
   open('stage');
-  run(combo, continueExtra(result, text), result.chid);
+  run(combo, continueExtra(result, text));
 }
 
 function streamSegments(text) {
@@ -322,11 +286,9 @@ function streamSegments(text) {
   return body.trim() ? [{ type: 'text', content: body }] : [];
 }
 
-export async function run(combo, extra = '', chidOverride) {
+export async function run(combo, extra = '') {
   if (busy) { toast('上一篇还在写'); return; }
-  const cast = castOfChat();
-  const chid = chidOverride != null && cast.some(c => c.chid === chidOverride) ? chidOverride : currentChid();
-  if (chid == null) { toast('先打开一个角色聊天'); return; }
+  if (!currentChar()) { toast(ctx().groupId ? '小剧场不支持群聊' : '先打开一个角色聊天'); return; }
   if (!isOpen()) open('stage');
   else if (tab !== 'stage') switchTab('stage');
   const ctrl = new AbortController();
@@ -367,7 +329,7 @@ export async function run(combo, extra = '', chidOverride) {
   };
   try {
     const result = await generateTheater(combo, {
-      chid, extra, signal: ctrl.signal, onStream,
+      extra, signal: ctrl.signal, onStream,
       onShell: shell => { if (busy?.token !== token) return; phase = '骨架已出，正在填字'; words = 0; showResult(shell, { pending: true }); tick(); },
     });
     clearTimeout(pendingPaint);
@@ -378,13 +340,12 @@ export async function run(combo, extra = '', chidOverride) {
     if (c) { c.plays = (c.plays || 0) + 1; save('combos'); }
     showResult(result);
     renderRecent();
-    renderCast();
   } catch (e) {
     clearTimeout(pendingPaint);
     if (busy?.token !== token) return;
     if (ctrl.signal.aborted) return;
     console.error('[小剧场]', e);
-    const retry = () => run(combo, extra, chid);
+    const retry = () => run(combo, extra);
     if (e.shellResult) {
       showResult(e.shellResult, { pending: true });
       setStatus(`第二步失败：${e.message}`, { spin: false, onRetry: retry });
@@ -795,20 +756,8 @@ function renderFav() {
     return;
   }
   if (!state.favorites.length) { box.appendChild(el('div', 'xjc-empty', '还没有收藏。roll 到喜欢的点「♡ 收藏」。')); return; }
-  const names = [...new Set(state.favorites.map(f => f.characterName).filter(Boolean))];
-  if (names.length > 1) {
-    const chips = el('div', 'xjc-chips');
-    chips.style.marginBottom = '12px';
-    for (const n of ['', ...names]) {
-      const c = el('button', 'xjc-chip' + (favFilter === n ? ' on' : ''), n || '全部');
-      c.type = 'button';
-      c.onclick = () => { favFilter = n; renderFav(); };
-      chips.appendChild(c);
-    }
-    box.appendChild(chips);
-  }
   const list = el('div', 'xjc-list');
-  for (const f of [...state.favorites].reverse().filter(x => !favFilter || x.characterName === favFilter)) {
+  for (const f of [...state.favorites].reverse()) {
     list.appendChild(resultItem(f, () => openViewer(f, {
       actions: [
         { label: '按这套再来', run: r => { again(r); return false; } },

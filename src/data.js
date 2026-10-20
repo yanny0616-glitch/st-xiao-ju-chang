@@ -91,7 +91,7 @@ export async function importBundle(data) {
     for (const f of data.favorites) {
       if (!f || typeof f !== 'object' || !Array.isArray(f.segments)) continue;
       if (state.favorites.some(x => x.id === f.id)) continue;
-      state.favorites.push({ ...f, id: f.id || uid('f'), characterName: f.characterName || '', createdAt: f.createdAt || new Date().toISOString() });
+      state.favorites.push({ ...f, id: f.id || uid('f'), createdAt: f.createdAt || new Date().toISOString() });
       n++;
     }
   }
