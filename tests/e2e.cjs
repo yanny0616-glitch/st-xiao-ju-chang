@@ -172,6 +172,10 @@ async function desktop(browser) {
   const t3 = await frameText(page, '.xjc-result iframe');
   ok(mockCalls().length - n1 === 2, '分两步出发了两次请求');
   ok(t3.includes('伞明显往一边歪') && t3.includes('侦探'), '第二步把字填进骨架');
+  await page.click('.xjc-ops .xjc-btn:has-text("ⓘ")');
+  const reqTxt = await page.textContent('.xjc-sheet .xjc-req');
+  ok(reqTxt.includes('第一步') && reqTxt.includes('第二步') && reqTxt.includes('<Brief>') && reqTxt.includes('<CharacterSheet>'), '「ⓘ」里能看到每一步发给模型的内容');
+  await page.click('.xjc-sheet .xjc-x');
 
   // 4. 自配 API：拉模型、测试、设为默认、流式
   await page.click('.xjc-tabs button[data-v="settings"]');
@@ -218,6 +222,10 @@ async function desktop(browser) {
 
   // 6. 楼层功能默认关：没有「挂到聊天」、消息菜单里没有面具按钮；打开后才有
   await page.click('.xjc-tabs button[data-v="stage"]');
+  await page.click('.xjc-result-hd h3');
+  await page.waitForSelector('.xjc-viewer .xjc-frame', { timeout: 5000 });
+  ok(await page.locator('.xjc-result-hd .xjc-fs').isVisible(), '结果卡右上角有「全屏」，点标题也能直接全屏');
+  await page.click('.xjc-viewer >> text=‹ 返回');
   ok(!(await page.locator('.xjc-ops >> text=挂到聊天').isVisible()), '楼层功能默认关：结果里没有「挂到聊天」');
   ok(await page.evaluate(() => { const b = document.querySelector('#chat .mes .xjc-mes-btn'); return !!b && getComputedStyle(b).display === 'none'; }), '楼层功能默认关：消息菜单里没有面具按钮');
   ok(await page.locator('.xjc-view[data-view="fav"] .xjc-seg').count() === 0, '楼层功能默认关：收藏页不显示「本聊天」');
@@ -357,6 +365,8 @@ async function desktop(browser) {
   const q = mockCalls().slice(before7f).find(c => JSON.stringify(c.messages).includes('<Brief>'));
   const qs = q ? JSON.stringify(q.messages) : '';
   ok(q && !qs.includes('<CharacterSheet>') && qs.includes('林晚是'), '走酒馆预设：材料由酒馆拼（有角色卡、没有插件自己的 <CharacterSheet>）');
+  const qreq = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0].request);
+  ok(qreq && qreq[0].via === 'preset' && !qreq[0].partial && JSON.stringify(qreq[0].messages).includes('林晚是') && JSON.stringify(qreq[0].messages).includes('<Brief>'), '走酒馆预设：记下的是酒馆拼好、实际发出去的消息');
   await sleep(1500);
   const lore = await page.evaluate(async () => {
     const c = SillyTavern.getContext();
@@ -448,7 +458,7 @@ async function mobile(browser) {
   await page.tap('.xjc-actions .pri');
   await waitResult(page);
   await page.screenshot({ path: `${SHOTS}/m-02-result.png` });
-  await page.tap('.xjc-ops >> text=⤢ 全屏');
+  await page.tap('.xjc-result-hd .xjc-fs');
   await page.waitForSelector('.xjc-viewer .xjc-frame');
   const vbar = await page.$eval('.xjc-viewer-bar', n => n.getBoundingClientRect().top);
   ok(vbar >= 59, `全屏查看器让开安全区（${vbar}px）`);

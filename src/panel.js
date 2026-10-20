@@ -10,7 +10,7 @@ import {
 import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
-  closeTopSheet, confirmSheet, snapshotInfo, openViewer, closeViewer, viewerOpen,
+  closeTopSheet, confirmSheet, snapshotInfo, requestView, openViewer, closeViewer, viewerOpen,
 } from './ui.js';
 import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks, addRows, combosFromPrompts, importDarkArchives, clearLibrary } from './data.js';
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
@@ -267,7 +267,15 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
   const snap = result.snapshot || {};
   const picks = snap.randoms || [];
   hd.appendChild(el('div', 'kind', `${pending ? '写作中' : KIND_LABEL[kindOf(result)]} · ${snap.comboName || result.comboName || '小剧场'}${picks.length ? ' · 随机 ' + picks.join('、') : ''}`));
-  hd.appendChild(el('h3', '', result.title || snap.comboName || '无题'));
+  const h3 = el('h3', '', result.title || snap.comboName || '无题');
+  hd.appendChild(h3);
+  if (!pending) {
+    // 和 Float 一样：右上角就是全屏，点标题也行
+    hd.appendChild(btn('⤢ 全屏', () => viewResult(result), 'xjc-btn sm ghost xjc-fs'));
+    h3.classList.add('tap');
+    h3.title = '点标题全屏看';
+    h3.onclick = () => viewResult(result);
+  }
   const statusEl = el('div', 'xjc-status');
   statusEl.hidden = true;
   const wrap = el('div', 'xjc-frame-wrap');
@@ -286,13 +294,14 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
       renderRecent();
     }, 'xjc-btn');
     ops.appendChild(favBtn);
-    ops.appendChild(btn('⤢ 全屏', () => viewResult(result), 'xjc-btn'));
     ops.appendChild(btn('挂到聊天', async () => {
       try { const at = await attachToLatest(result); toast(`已挂到第 ${at} 楼下面`, 'success'); } catch (e) { fail(e); }
     }, 'xjc-btn xjc-attach'));
     ops.appendChild(btn('复制', async () => toast((await copyText(`${result.title}\n\n${resultPlainText(result)}`)) ? '已复制正文' : '复制失败'), 'xjc-btn ghost'));
     ops.appendChild(btn('ⓘ', () => openSheet('这一篇用了什么', b => {
       b.appendChild(snapshotInfo(result));
+      b.appendChild(el('div', 'xjc-sec', '发给模型的内容'));
+      b.appendChild(requestView(result));
       b.appendChild(el('div', 'xjc-sec', '模型原文'));
       b.appendChild(el('pre', 'xjc-pre', result.raw || ''));
     }), 'xjc-btn ghost'));

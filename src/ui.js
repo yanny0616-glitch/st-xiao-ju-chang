@@ -1,5 +1,5 @@
 // 表单控件、面板内抽屉、确认框、全屏查看器
-import { el, btn, esc, fmtTime } from './util.js';
+import { el, btn, esc, fmtTime, copyText, toast } from './util.js';
 import { mountFrame, markTheme } from './frame.js';
 import { segmentsOf, contextLabel, KIND_LABEL, kindOf, charCount } from './gen.js';
 import { targetLabel } from './host.js';
@@ -137,6 +137,39 @@ export function snapshotInfo(result) {
   return dl;
 }
 
+// ── 这一篇实际发给模型的内容 ──
+const STEP_LABEL = { shell: '第一步 · 页面骨架', fill: '第二步 · 填字', text: '' };
+const ROLE_LABEL = { system: 'system', user: 'user', assistant: 'assistant', prompt: '整段提示词' };
+export function requestText(result) {
+  return (result.request || []).map(r => [STEP_LABEL[r.kind] ? `===== ${STEP_LABEL[r.kind]} =====` : '', ...r.messages.map(m => `[${ROLE_LABEL[m.role] || m.role}]\n${m.content}`)].filter(Boolean).join('\n\n')).join('\n\n');
+}
+export function requestView(result) {
+  const box = el('div', 'xjc-req');
+  const reqs = Array.isArray(result?.request) ? result.request.filter(r => r && Array.isArray(r.messages)) : [];
+  if (!reqs.length) {
+    box.appendChild(el('p', 'xjc-hint', '这一篇没有记录发送内容（更新前生成的，或者挂在楼层里的——楼层里不存这份，免得聊天文件变大）。'));
+    return box;
+  }
+  for (const r of reqs) {
+    if (reqs.length > 1 && STEP_LABEL[r.kind]) box.appendChild(el('div', 'xjc-req-step', STEP_LABEL[r.kind]));
+    if (r.via === 'preset') box.appendChild(el('p', 'xjc-hint', r.partial
+      ? '走酒馆预设：没抓到酒馆拼好的完整内容，下面只是插件补的前置和 <Brief>；酒馆还会按预设加上角色卡、世界书、聊天记录。'
+      : '走酒馆预设：下面是酒馆按预设拼好、实际发出去的内容。'));
+    for (const m of r.messages) {
+      const d = el('details', 'xjc-req-msg');
+      const n = String(m.content || '').length;
+      const sum = el('summary');
+      sum.append(el('b', '', ROLE_LABEL[m.role] || m.role), el('span', '', ` · ${n} 字 · ${String(m.content || '').replace(/\s+/g, ' ').slice(0, 40)}${n > 40 ? '…' : ''}`));
+      d.append(sum, el('pre', 'xjc-pre', m.content || ''));
+      // 用户能改的部分（<Brief>）默认展开，材料很长默认收起
+      if (m.role === 'user' && r.messages.length > 1) d.open = true;
+      box.appendChild(d);
+    }
+  }
+  box.appendChild(btn('复制发送内容', async () => toast((await copyText(requestText(result))) ? '已复制发送内容' : '复制失败'), 'xjc-btn sm'));
+  return box;
+}
+
 // ── 全屏查看器（面板和聊天共用） ──
 let viewer = null;
 export function openViewer(result, { actions = [], onAction } = {}) {
@@ -150,6 +183,8 @@ export function openViewer(result, { actions = [], onAction } = {}) {
   const info = el('div', 'xjc-viewer-info');
   info.hidden = true;
   info.appendChild(snapshotInfo(result));
+  info.appendChild(el('div', 'xjc-sec', '发给模型的内容'));
+  info.appendChild(requestView(result));
   bar.appendChild(btn('ⓘ', () => { info.hidden = !info.hidden; }, 'xjc-btn ghost sm'));
   for (const a of actions) {
     const b = btn(a.label, async () => { const keep = await a.run(result, b); if (!keep) closeViewer(); }, 'xjc-btn sm');

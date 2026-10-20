@@ -12,7 +12,8 @@ const running = new Map(); // message 对象 → { ctrl }
 
 // ── 存 ──
 function slim(result) {
-  const { comboCopy, ...rest } = result;
+  // 发送内容可能很长（带着聊天记录），不存进聊天文件
+  const { comboCopy, request, ...rest } = result;
   const copy = comboCopy ? { ...comboCopy } : null;
   if (copy) delete copy._dependencies;
   return { ...rest, comboCopy: copy };

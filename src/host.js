@@ -183,11 +183,23 @@ export async function callQuiet(prompt) {
   const maxCtx = Number(c.mainApi === 'openai' ? c.chatCompletionSettings?.openai_max_context : c.maxContext) || 0;
   const want = Math.max(256, Number(state.settings.maxTokens) || 4096);
   const responseLength = maxCtx ? Math.max(256, Math.min(want, Math.floor(maxCtx / 2))) : want;
-  const text = await c.generateQuietPrompt({ quietPrompt: prompt, responseLength, removeReasoning: true });
+  // 酒馆按预设拼好的那份才是真正发出去的；趁它发之前抓下来给「ⓘ」看
+  const got = {};
+  const ev = c.eventTypes || {};
+  const onChat = d => { if (d && !d.dryRun && Array.isArray(d.chat)) got.messages = d.chat.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) })); };
+  const onText = d => { if (d && !d.dryRun && typeof d.prompt === 'string') got.messages = [{ role: 'prompt', content: d.prompt }]; };
+  if (ev.CHAT_COMPLETION_PROMPT_READY) c.eventSource.on(ev.CHAT_COMPLETION_PROMPT_READY, onChat);
+  if (ev.GENERATE_AFTER_COMBINE_PROMPTS) c.eventSource.on(ev.GENERATE_AFTER_COMBINE_PROMPTS, onText);
+  let text;
+  try { text = await c.generateQuietPrompt({ quietPrompt: prompt, responseLength, removeReasoning: true }); }
+  finally {
+    c.eventSource.removeListener?.(ev.CHAT_COMPLETION_PROMPT_READY, onChat);
+    c.eventSource.removeListener?.(ev.GENERATE_AFTER_COMBINE_PROMPTS, onText);
+  }
   if (text == null) throw new Error('酒馆没有出结果：先在酒馆里连上 API（插头图标），或者这个小剧场改回「插件自己拼」。');
   let model = '';
   try { model = c.mainApi === 'openai' ? c.getChatCompletionModel?.() : c.onlineStatus; } catch { /* ignore */ }
-  return { text: String(text || ''), model: model && model !== 'no_connection' ? String(model) : '', streamed: false };
+  return { text: String(text || ''), model: model && model !== 'no_connection' ? String(model) : '', streamed: false, sent: got.messages || null };
 }
 
 /** 写回记忆：把这篇的梗概写成一条世界书条目，放进这个聊天绑定的世界书（没有就新建一本并绑上） */

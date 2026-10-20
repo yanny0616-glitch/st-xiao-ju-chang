@@ -244,13 +244,23 @@ async function generateOnce(comboIn, opts = {}) {
   const wantStream = !!opts.onStream && state.settings.streamPreview !== false;
   const cancelled = () => !!signal?.aborted;
 
+  // 每一步实际发给模型的消息，存进结果里给「ⓘ」看
+  const sent = [];
   const call = async (tasks, kind) => {
-    if (quiet) return callQuiet(`${preamble}\n\n${tasks}`);
+    if (quiet) {
+      const prompt = `${preamble}\n\n${tasks}`;
+      const rec = { kind, via: 'preset', messages: [{ role: 'system', content: prompt }], partial: true };
+      sent.push(rec);
+      const r = await callQuiet(prompt);
+      if (r.sent?.length) Object.assign(rec, { messages: r.sent, partial: false });
+      return r;
+    }
     const messages = [
       { role: 'system', content: mat.text },
       { role: 'system', content: preamble },
       { role: 'user', content: tasks },
     ];
+    sent.push({ kind, via: target, messages: messages.map(m => ({ ...m })) });
     const onChunk = wantStream ? text => {
       if (cancelled()) return;
       const t = previewText(text);
@@ -260,7 +270,7 @@ async function generateOnce(comboIn, opts = {}) {
   };
   const base = {
     id: uid('r'), characterName: mat.charName,
-    createdAt: new Date().toISOString(), comboCopy: combo, target,
+    createdAt: new Date().toISOString(), comboCopy: combo, target, request: sent,
   };
 
   const o = combo.output || {};
