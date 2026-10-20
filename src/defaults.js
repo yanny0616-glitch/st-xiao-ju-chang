@@ -51,10 +51,10 @@ const out = (mode, wrapTag = "") => ({ mode, wrapTag, length: "default", customC
 const combo = (id, name, tags, preambleId, promptIds, random, output, context, weight) => ({ id, name, tags, preambleId, parts: [{ id: `pt_${id}`, name: "", items: promptIds.map(p => `p:${p}`), pick: 0 }], random, output, context, who: "", whoText: "", channel: "", writeBack: null, api: "", weight });
 
 const DEFAULT_COMBOS = [
-  combo("c_store", "深夜便利店偶遇", ["日常", "心动", "雨"], "pre_strict", ["p_scene_store", "p_if_wait", "p_form_novel"], { count: 1, include: ["细节"], exclude: [] }, out("text", "theater"), null, 3),
+  combo("c_store", "深夜便利店偶遇", ["日常", "心动", "雨"], "pre_strict", ["p_scene_store", "p_if_wait", "p_form_novel"], { count: 0, include: ["细节"], exclude: [] }, out("text", "theater"), null, 3),
   combo("c_live", "直播间翻车现场", ["搞笑", "弹幕"], "pre_strict", ["p_scene_live", "p_form_danmaku"], { count: 0, include: [], exclude: [] }, out("html"), ctxRecent(8), 2),
-  combo("c_call", "未接来电", ["虐", "手机"], "pre_strict", ["p_scene_trip", "p_form_phone"], { count: 1, include: ["细节"], exclude: ["AU"] }, out("html"), ctxRecent(30), 1),
-  combo("c_au", "平行世界抽卡", ["AU", "随机"], "pre_lite", ["p_form_extra"], { count: 2, include: ["AU", "番外"], exclude: [] }, out("text", "theater"), ctxNone(), 2),
+  combo("c_call", "未接来电", ["虐", "手机"], "pre_strict", ["p_scene_trip", "p_form_phone"], { count: 0, include: ["细节"], exclude: ["AU"] }, out("html"), ctxRecent(30), 1),
+  combo("c_au", "平行世界抽卡", ["AU", "随机"], "pre_lite", ["p_form_extra"], { count: 0, include: ["AU", "番外"], exclude: [] }, out("text", "theater"), ctxNone(), 2),
   combo("c_tarot", "塔罗屋", ["神秘", "交互"], "pre_strict", ["p_scene_tarot", "p_form_tarot"], { count: 0, include: [], exclude: [] }, out("html"), null, 2),
 ];
 

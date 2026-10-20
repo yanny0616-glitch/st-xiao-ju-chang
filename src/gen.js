@@ -242,7 +242,7 @@ export function aiPickCombo() {
   return {
     id: '', name: 'AI 自选', tags: ['随机'], preambleId: state.settings.defaultPreambleId || (state.preambles[0] || {}).id,
     promptIds: [], _virtualPrompts: [picker],
-    random: { count: 1, include: [], exclude: [] },
+    random: { count: 0, include: [], exclude: [] },
     output: { mode: 'mixed', wrapTag: '', length: 'default', customChars: 900, style: '', staged: false },
     context: null, who: '', channel: '', writeBack: null, whoText: '', api: '', weight: 1,
   };
