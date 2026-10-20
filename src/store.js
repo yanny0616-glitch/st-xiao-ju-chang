@@ -3,6 +3,7 @@
 // 存成服务器上的用户文件（data/<用户>/user/files/xiao-ju-chang-*.json），换设备、换浏览器都跟着走。以前放在浏览器 IndexedDB / settings.json 里的，第一次读到时搬过去。
 import { ctx, isTT, clone, toast } from './util.js';
 import { DEFAULT_PREAMBLES, DEFAULT_PROMPTS, DEFAULT_RANDOMS, DEFAULT_MACROS, DEFAULT_COMBOS, DEFAULT_SETTINGS } from './defaults.js';
+import { migrateParts } from './parts.js';
 
 const NS = 'xiao-ju-chang';
 const ST_KEY = 'xiaoJuChang';
@@ -149,6 +150,8 @@ export async function load() {
     state.settings.seeded = true;
     await saveAll();
   }
+  // 0.4.2 起提示词按「段」排；旧的 promptIds 换过来
+  if (migrateParts(state.combos)) await save('combos');
 }
 
 export function save(name) {

@@ -2,6 +2,7 @@
 import { uid, clone } from './util.js';
 import { state, save, saveAll, LIBRARY } from './store.js';
 import { scanLooseJson } from './scan.js';
+import { partsOf, comboPromptIds, newPart } from './parts.js';
 
 export const APP_ID = 'st.xiaojuchang';
 const strip = r => { const { createdAt, updatedAt, ...rest } = r; return rest; };
@@ -16,7 +17,7 @@ export function exportBundle({ withApis = false, withFavorites = true } = {}) {
   };
 }
 export function exportCombo(combo) {
-  const ids = new Set(combo.promptIds || []);
+  const ids = new Set(comboPromptIds(combo));
   return {
     app: APP_ID, version: 1, kind: 'combo',
     combos: [strip(combo)], preambles: state.preambles.filter(p => p.id === combo.preambleId).map(strip),
@@ -38,11 +39,16 @@ function normalizeCombo(c) {
     : mem.mode === 'none' ? { chat: 'none', rounds: 12, worldInfo: true, summary: false }
     : mem.mode === 'recent' ? { chat: 'recent', rounds: mem.rounds || 12, worldInfo: true, summary: true } : null;
   const o = c.output || {};
+  // 旧版随机里只选了提示词分组：那部分已经换成一段随机，随机池就不再抽
+  const oldGroups = Array.isArray(c.random?.groups) ? c.random.groups : [];
+  const movedOut = !Array.isArray(c.parts) && oldGroups.length > 0 && oldGroups.every(g => String(g).startsWith('prompts/'));
   return {
     id: str(c.id, 80), name: str(c.name, 60) || '未命名', tags: tags(c.tags),
-    preambleId: str(c.preambleId, 80), promptIds: Array.isArray(c.promptIds) ? c.promptIds.filter(x => typeof x === 'string') : [],
-    // groups：从哪些分组里抽，'prompts/组名' 或 'randoms/组名'；空 = 整个随机池
-    random: { count: num(c.random?.count, 0, 0, 5), include: tags(c.random?.include), exclude: tags(c.random?.exclude), groups: (Array.isArray(c.random?.groups) ? c.random.groups : []).map(String).filter(g => /^(prompts|randoms)\/.{1,30}$/.test(g)).slice(0, 30) },
+    preambleId: str(c.preambleId, 80),
+    // 段：每段 items 是 'p:提示词id' 或 'g:分组名'，pick 0 = 全用，n = 随机抽 n 条。旧的 promptIds 换成一段
+    parts: partsOf(c).slice(0, 20).map(pt => ({ ...newPart(), id: str(pt.id, 80) || newPart().id, name: str(pt.name, 30), pick: num(pt.pick, 0, 0, 20), items: (Array.isArray(pt.items) ? pt.items : []).map(String).filter(x => /^[pg]:/.test(x)).slice(0, 100) })),
+    // groups：从随机池哪些分组里抽，'randoms/组名'；空 = 整个随机池（旧版选的提示词分组已经换成段）
+    random: { count: movedOut ? 0 : num(c.random?.count, 0, 0, 5), include: tags(c.random?.include), exclude: tags(c.random?.exclude), groups: (Array.isArray(c.random?.groups) ? c.random.groups : []).map(String).filter(g => /^randoms\/.{1,30}$/.test(g)).slice(0, 30) },
     output: {
       mode: ['text', 'html', 'mixed'].includes(o.mode) ? o.mode : 'text', wrapTag: /^[a-zA-Z][\w-]{0,30}$/.test(o.wrapTag || '') ? o.wrapTag : '',
       length: ['default', 'short', 'medium', 'long', 'custom'].includes(o.length) ? o.length : 'default', customChars: num(o.customChars, 900, 50, 20000),
@@ -80,7 +86,7 @@ export async function importBundle(data) {
       const row = normalizers[name](raw);
       if (name === 'combos') {
         row.preambleId = idMap[row.preambleId] || row.preambleId;
-        row.promptIds = row.promptIds.map(id => idMap[id] || id);
+        for (const pt of row.parts) pt.items = pt.items.map(it => (it.startsWith('p:') && idMap[it.slice(2)] ? `p:${idMap[it.slice(2)]}` : it));
       }
       const srcId = row.id;
       const keep = srcId && state[name].some(x => x.id === srcId);

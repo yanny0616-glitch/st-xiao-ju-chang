@@ -6,6 +6,7 @@ import { LENGTH_CHARS, LENGTH_LABEL } from './defaults.js';
 import { instr } from './instr.js';
 import { buildMaterials, callModel, callQuiet, writeBackToLore, resolveTarget, userName, currentChar } from './host.js';
 import { resolveCombo } from './follow.js';
+import { partsOf, partPool } from './parts.js';
 
 const STYLE_HINT = { vars: 'styleVars', strict: 'styleStrict' };
 const styleHint = style => (STYLE_HINT[style] ? instr(STYLE_HINT[style]) : '');
@@ -17,18 +18,34 @@ export function captureCombo(combo) {
   if (!copy._dependencies) {
     copy._dependencies = clone({
       preamble: byId(state.preambles, combo.preambleId) || state.preambles[0] || null,
-      prompts: (combo.promptIds || []).map(id => byId(state.prompts, id)).filter(Boolean),
+      // 每段存下当时能用的提示词；带随机的段重放时从这里重新抽
+      parts: partsOf(combo).map(pt => ({ name: pt.name || '', pick: Number(pt.pick) || 0, pool: partPool(pt) })),
       randoms: state.randoms, macros: state.macros,
-      // 随机从提示词分组里抽时，那几个组的提示词也存一份，重放时照当时的抽
-      groupPrompts: state.prompts.filter(p => (combo.random?.groups || []).includes(`prompts/${p.group || ''}`)),
       length: resolveLength(combo),
     });
   }
   return copy;
 }
-function comboPrompts(combo) {
-  const listed = combo._dependencies ? combo._dependencies.prompts : (combo.promptIds || []).map(id => byId(state.prompts, id)).filter(Boolean);
-  return [...(combo._virtualPrompts || []), ...listed];
+/** 各段和它们能用的提示词。旧收藏里存的是 prompts（+ 提示词分组的 groupPrompts），也照样能用 */
+export function comboParts(combo) {
+  const deps = combo._dependencies;
+  if (deps?.parts) return deps.parts;
+  if (deps) {
+    const out = [{ name: '', pick: 0, pool: deps.prompts || [] }];
+    const gs = (combo.random?.groups || []).filter(g => String(g).startsWith('prompts/'));
+    if (gs.length) out.push({ name: '随机', pick: Math.max(1, Number(combo.random.count) || 1), pool: (deps.groupPrompts || []).filter(p => gs.includes(`prompts/${p.group || ''}`)) });
+    return out;
+  }
+  return partsOf(combo).map(pt => ({ name: pt.name || '', pick: Number(pt.pick) || 0, pool: partPool(pt) }));
+}
+/** 这次每段用哪几条：全用的段全用；随机的段先看「这次指定」，没指定就抽 */
+function drawParts(combo, forcedIds = []) {
+  const forced = new Set(forcedIds);
+  return comboParts(combo).map(pt => {
+    if (!pt.pick || pt.pool.length <= pt.pick) return { ...pt, used: pt.pool, random: false };
+    const own = pt.pool.filter(p => forced.has(p.id));
+    return { ...pt, used: own.length ? own : shuffle(pt.pool).slice(0, pt.pick), random: true, forced: own.length > 0 };
+  });
 }
 function comboPreamble(combo) {
   return combo._dependencies ? combo._dependencies.preamble : byId(state.preambles, combo.preambleId) || state.preambles[0];
@@ -57,17 +74,9 @@ export function randomCandidates(combo) {
   const inc = new Set(rule.include || []), exc = new Set(rule.exclude || []);
   const deps = combo._dependencies;
   const randoms = deps ? deps.randoms : state.randoms;
-  // 选了分组就只从这些组里抽（随机池的组、提示词库的组都行，已经固定放进小剧场的提示词不再抽）；没选 = 整个随机池
-  const groups = rule.groups || [];
-  let source = randoms;
-  if (groups.length) {
-    const prompts = deps ? (deps.groupPrompts || []) : state.prompts;
-    const fixed = new Set(combo.promptIds || []);
-    source = [
-      ...randoms.filter(r => groups.includes(`randoms/${r.group || ''}`)),
-      ...prompts.filter(p => groups.includes(`prompts/${p.group || ''}`) && !fixed.has(p.id)),
-    ];
-  }
+  // 选了随机池的分组就只从这些组里抽；没选 = 整个随机池（提示词库的分组在「段」里抽）
+  const groups = (rule.groups || []).filter(g => String(g).startsWith('randoms/'));
+  const source = groups.length ? randoms.filter(r => groups.includes(`randoms/${r.group || ''}`)) : randoms;
   let pool = source.filter(r => {
     const tags = r.tags || [];
     if (tags.some(t => exc.has(t))) return false;
@@ -85,8 +94,11 @@ function drawRandoms(combo) {
 /** <Brief> 全文 + 这次用了什么 */
 function buildTasks(combo, extra, charName, phase = null) {
   const mctx = macroCtx(combo, charName);
-  const prompts = comboPrompts(combo);
-  const randoms = phase && phase.randoms ? phase.randoms : drawRandoms(combo);
+  // 分两步出的第二步沿用第一步抽到的
+  const parts = phase?.parts || drawParts(combo, phase?.forcedIds);
+  const prompts = [...(combo._virtualPrompts || []), ...parts.flatMap(pt => pt.used)];
+  const forcedR = phase?.forcedIds?.length ? randomCandidates(combo).filter(r => phase.forcedIds.includes(r.id)) : [];
+  const randoms = phase?.randoms || (forcedR.length ? forcedR : drawRandoms(combo));
   const len = resolveLength(combo);
   const o = combo.output || {};
   const lines = ['<Brief>'];
@@ -95,9 +107,12 @@ function buildTasks(combo, extra, charName, phase = null) {
   if (who === 'persona') lines.push(`【身份】${instr(hasPersona ? 'whoPersona' : 'whoPersonaBare', { 用户: mctx.user })}`);
   else if (who === 'custom') lines.push(`【身份】${instr('whoCustom', { 身份: expand(combo.whoText || '', mctx) || '由你根据场景安排' })}`);
   else lines.push(`【身份】${instr('whoNone', { 用户: mctx.user, 角色: mctx.char })}`);
-  let i = 1;
-  for (const p of prompts) lines.push(`【任务 ${i++} · ${p.title}】${expand(p.content, mctx)}`);
+  // 几条提示词是同一篇的要求，按段的顺序拼，不编号（编成「任务 1、任务 2」模型会当成几篇分开写）
+  if (prompts.length > 1) lines.push(`【这一篇】${instr('combine')}`);
+  for (const p of combo._virtualPrompts || []) lines.push(`【${p.title}】${expand(p.content, mctx)}`);
+  for (const pt of parts) for (const p of pt.used) lines.push(`【${pt.name ? `${pt.name} · ` : ''}${p.title}】${expand(p.content, mctx)}`);
   for (const r of randoms) lines.push(`【随机附加 · ${r.title}】${expand(r.content, mctx)}`);
+  if (phase?.follow) lines.push(`【接着前面】${phase.follow.text}`);
   if (extra) lines.push(`【本次追加】${expand(extra, mctx)}`);
   const out = [];
   const kind = phase && phase.kind;
@@ -124,10 +139,15 @@ function buildTasks(combo, extra, charName, phase = null) {
   lines.push('</Brief>');
   const ctxOpt = combo.context || {};
   return {
-    tasks: lines.join('\n'), randoms,
+    tasks: lines.join('\n'), randoms, parts,
     snapshot: {
       comboId: combo.id || '', comboName: combo.name, preambleName: (comboPreamble(combo) || {}).name || '',
-      prompts: prompts.map(p => p.title), randoms: randoms.map(r => r.title), randomsForced: !!phase?.forced, who, output: { ...o },
+      prompts: prompts.map(p => p.title), randoms: randoms.map(r => r.title), randomsForced: forcedR.length > 0 || parts.some(pt => pt.forced),
+      parts: parts.filter(pt => pt.random).map(pt => ({ name: pt.name, of: pt.pool.length, used: pt.used.map(p => p.title) })),
+      // 随机抽到的（段里的和随机池的）；「接着写 / 追问」时沿用
+      pickedIds: [...parts.filter(pt => pt.random).flatMap(pt => pt.used.map(p => p.id)), ...randoms.map(r => r.id)],
+      ...(phase?.follow ? { follow: { mode: phase.follow.mode, of: phase.follow.of, ask: phase.follow.ask } } : {}),
+      who, output: { ...o },
       length: len ? `${len.label} · 约 ${len.chars} 字` : '不限',
       context: { chat: ctxOpt.chat || 'none', rounds: ctxOpt.rounds || 12, worldInfo: ctxOpt.worldInfo !== false, summary: ctxOpt.summary !== false },
       extra: extra || '', staged: kind === 'shell',
@@ -254,9 +274,11 @@ async function generateOnce(comboIn, opts = {}) {
   const combo = captureCombo(comboIn);
   // 舞台上「这次指定」的随机条目：只管这一次，不存进 comboCopy（「按这套再来」照常随机）
   delete combo._forcedRandomIds;
-  const forcedIds = comboIn._forcedRandomIds || [];
-  const forced = forcedIds.length ? forcedIds.map(id => randomCandidates(combo).find(x => x.id === id)).filter(Boolean) : [];
-  const force = forced.length ? { randoms: forced, forced: true } : {};
+  // 接着写 / 追问：沿用上一篇抽到的，带上前文
+  const fol = opts.follow;
+  const forcedIds = comboIn._forcedRandomIds || (fol ? fol.of.snapshot?.pickedIds : null) || [];
+  const follow = fol ? { mode: fol.mode, of: fol.of.title || '', ask: fol.text || '', text: followText(fol.of, fol.mode, fol.text) } : null;
+  const force = { forcedIds, follow };
   const signal = opts.signal;
   const ctxOpt = combo.context || { chat: 'recent', rounds: 12 };
   const mat = await buildMaterials({ context: ctxOpt, who: combo.who, uptoIndex: opts.uptoIndex });
@@ -300,7 +322,7 @@ async function generateOnce(comboIn, opts = {}) {
     return callModel(messages, { target, onChunk, signal });
   };
   const base = {
-    id: uid('r'), characterName: mat.charName, characterAvatar: currentChar()?.avatar || '',
+    id: uid('r'), characterName: mat.charName, ...(fol ? { thread: threadOf(fol.of) } : {}), characterAvatar: currentChar()?.avatar || '',
     createdAt: new Date().toISOString(), comboCopy: combo, target, request: sent, ...(channelNote ? { channelNote } : {}),
   };
 
@@ -317,7 +339,7 @@ async function generateOnce(comboIn, opts = {}) {
     if (!seg || !found.slots.length) return { ...base, raw: shell.text, title: parsed.title, segments: parsed.segments, snapshot: { ...shellTask.snapshot, staged: false }, model: shell.model };
     const shellResult = { ...base, raw: shell.text, title: parsed.title, segments: parsed.segments, snapshot: shellTask.snapshot, model: shell.model, pending: true };
     opts.onShell?.(shellResult);
-    const fillTask = buildTasks(combo, opts.extra, mat.charName, { kind: 'fill', randoms: shellTask.randoms, forced: !!force.forced, slots: found.slots, outline: found.outline });
+    const fillTask = buildTasks(combo, opts.extra, mat.charName, { ...force, kind: 'fill', randoms: shellTask.randoms, parts: shellTask.parts, slots: found.slots, outline: found.outline });
     let fill;
     try { fill = await call(fillTask.tasks, 'fill'); }
     catch (e) { e.shellResult = shellResult; throw e; }
@@ -327,12 +349,31 @@ async function generateOnce(comboIn, opts = {}) {
     const segments = parsed.segments.map(x => (x === seg ? { type: 'html', content: fillSlots(seg.content, map) } : x));
     return { ...shellResult, pending: false, raw: `${shell.text}\n\n<!-- 填字 -->\n${fill.text}`, segments, model: shell.model || fill.model };
   }
-  const { tasks, snapshot } = buildTasks(combo, opts.extra, mat.charName, forced.length ? force : null);
+  const { tasks, snapshot } = buildTasks(combo, opts.extra, mat.charName, force);
   const { text, model } = await call(tasks, 'text');
   if (cancelled()) return null;
   if (!text.trim()) throw new Error('模型没有返回内容。');
   const parsed = postProcess(text, combo);
   return { ...base, raw: text, title: parsed.title, segments: parsed.segments, snapshot, model };
+}
+
+// ── 接着写 / 追问：带上前面最多三篇的正文 ──
+const pieceText = (r, max) => resultPlainText(r).slice(0, max);
+/** 新一篇记着的前文（不含它自己），最多三篇，每篇截一段 */
+function threadOf(prev) {
+  return [...(Array.isArray(prev.thread) ? prev.thread : []), { title: prev.title || '', text: pieceText(prev, 3000) }].slice(-3);
+}
+/** 「再来一条」接着写出来的那篇：用它记着的前文重新接一次 */
+export function followAgain(result) {
+  const f = result?.snapshot?.follow, th = result?.thread;
+  if (!f || !Array.isArray(th) || !th.length) return null;
+  const last = th[th.length - 1];
+  return { mode: f.mode, text: f.ask || '', of: { title: last.title, segments: [{ type: 'text', content: last.text }], thread: th.slice(0, -1), snapshot: { pickedIds: result.snapshot.pickedIds || [] } } };
+}
+function followText(prev, mode, ask) {
+  const earlier = (Array.isArray(prev.thread) ? prev.thread : []).slice(-2).map(t => `《${t.title}》\n${t.text}`);
+  const before = [...earlier, `《${prev.title || '上一篇'}》\n${pieceText(prev, 6000)}`].join('\n\n');
+  return instr(mode === 'ask' ? 'followAsk' : 'followWrite', { 前文: before, 要求: ask || '（用户没写，自己往下发展）' });
 }
 
 /** 交互型 HTML 里点了带 data-action 的按钮：带着上一篇和选择再写一篇 */

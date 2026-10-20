@@ -17,6 +17,15 @@ export function btn(label, onClick, cls) {
   if (onClick) b.addEventListener('click', onClick);
   return b;
 }
+/** 只有图标的按钮；title 当悬停提示和读屏文字 */
+export function ibtn(icon, title, onClick, cls = 'xjc-btn sm ghost icon') {
+  const b = btn('', onClick, cls);
+  b.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+  b.classList.add('icon');
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  return b;
+}
 export const uid = (p = 'x') => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 export const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
 export const byId = (list, id) => (id ? list.find(x => x.id === id) : undefined) || null;

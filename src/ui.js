@@ -125,14 +125,17 @@ export function snapshotInfo(result) {
   const dl = el('dl', 'xjc-kv');
   const row = (k, v) => { if (!v) return; dl.append(el('dt', '', k), el('dd', '', v)); };
   row('小剧场', s.comboName);
+  if (s.follow) row(s.follow.mode === 'ask' ? '追问' : '接着写', `《${s.follow.of || '上一篇'}》`);
   row('前置', s.preambleName);
   row('提示词', (s.prompts || []).join('、'));
-  row(s.randomsForced ? '随机（这次指定）' : '随机', (s.randoms || []).join('、'));
+  for (const pt of s.parts || []) row(`${pt.name || '随机段'}（${pt.of} 条里抽）`, (pt.used || []).join('、'));
+  row(s.randomsForced ? '随机（有指定的）' : '随机附加', (s.randoms || []).join('、'));
   row('输出', `${KIND_LABEL[kindOf(result)]} · 篇幅 ${s.length || '不限'}${s.staged ? ' · 分两步' : ''}`);
   row('上下文', contextLabel(s.context));
   row('通道', result.channelNote);
   row('身份', s.who === 'custom' ? '自定身份' : s.who === 'none' ? '旁观' : '用户人设');
   row('出口', `${targetLabel(result.target)}${result.model ? ' · ' + result.model : ''}`);
+  if (s.follow?.ask) row('要求', s.follow.ask);
   if (s.extra) row('追加', s.extra.length > 120 ? s.extra.slice(0, 120) + '…' : s.extra);
   row('时间', `${fmtTime(result.createdAt)} · ${charCount(result)} 字`);
   return dl;

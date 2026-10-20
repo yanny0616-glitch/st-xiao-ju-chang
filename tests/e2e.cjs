@@ -193,7 +193,7 @@ async function desktop(browser) {
   const t3 = await frameText(page, '.xjc-result iframe');
   ok(mockCalls().length - n1 === 2, '分两步出发了两次请求');
   ok(t3.includes('伞明显往一边歪') && t3.includes('侦探'), '第二步把字填进骨架');
-  await page.click('.xjc-ops .xjc-btn:has-text("ⓘ")');
+  await page.click('.xjc-ops .xjc-btn[title="这一篇用了什么"]');
   const reqTxt = await page.textContent('.xjc-sheet .xjc-req');
   ok(reqTxt.includes('第一步') && reqTxt.includes('第二步') && reqTxt.includes('<Brief>') && reqTxt.includes('<CharacterSheet>'), '「ⓘ」里能看到每一步发给模型的内容');
   await page.click('.xjc-sheet .xjc-x');
@@ -222,7 +222,7 @@ async function desktop(browser) {
   ok(pTitles.every(p => tmpSys.includes(p.c)), `直接用提示词生成：选的几条都发给了模型（${pTitles.map(p => p.t + ':' + tmpSys.includes(p.c)).join(' ')}）`);
   await page.click('.xjc-combo-card .xjc-btn:has-text("存成小剧场")');
   await page.click('.xjc-sheet-ft >> text="保存"');
-  const after3c = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.id === s.settings.currentComboId); return { n: s.combos.length, ids: c?.promptIds?.length }; });
+  const after3c = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.id === s.settings.currentComboId); return { n: s.combos.length, ids: (c?.parts || []).flatMap(pt => pt.items).length }; });
   ok(after3c.n === nCombos + 1 && after3c.ids === 2 && !(await page.textContent('.xjc-combo-card .nm')).includes('临时'), '「存成小剧场」存进库并放到舞台');
 
   // 3c2. 舞台上「这次抽」：带随机的小剧场可以指定这次用哪几条；「直接用提示词」能选前置要求
@@ -278,11 +278,11 @@ async function desktop(browser) {
   await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("分组")').click();
   const autoG = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.filter(p => !p.group).length);
   ok(autoG === 0, '「按第一个标签分组」把没分组的都按标签分好');
-  await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("场景")) .xjc-btn:has-text("改名")').click();
+  await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("场景")) .xjc-btn[title="改名"]').click();
   await page.fill('.xjc-sheet input[placeholder="新名字"]', '场景库');
   await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("改名")').click();
   ok(await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd b:text-is("场景库")').count() === 1, '分组能改名');
-  await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("场景库")) .xjc-btn:has-text("解散")').click();
+  await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd:has(b:text-is("场景库")) .xjc-btn[title="解散分组"]').click();
   await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("解散")').click();
   ok(await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd b:text-is("场景库")').count() === 0 && await page.locator('.xjc-view[data-view="library"] .xjc-grp-hd b:text-is("未分组")').count() === 1, '解散分组：条目回到「未分组」');
   // 编辑小剧场：选提示词整组加入
@@ -292,12 +292,62 @@ async function desktop(browser) {
   await page.locator('.xjc-sheet').last().locator('.xjc-grp-hd:has(b:text-is("塔罗形式")) .xjc-btn:has-text("整组加入")').click();
   await page.locator('.xjc-sheet').last().locator('.xjc-sheet-ft .xjc-btn:has-text("确定")').click();
   ok(await page.locator('.xjc-sheet .xjc-ordered .xjc-item').count() === 3, '选提示词：整组加入');
-  await page.locator('.xjc-sheet .xjc-x').last().click();
+  // 分段：「牌阵」段放三种塔罗形式、随机抽 1；再加一段「主题」放一条场景并移到前面
+  const ed = page.locator('.xjc-sheet').last();
+  await ed.locator('.xjc-field:has(> .lb:text-is("名字")) input').fill('塔罗分段');
+  await ed.locator('.xjc-part').nth(0).locator('.xjc-part-hd input').fill('牌阵');
+  await ed.locator('.xjc-part').nth(0).locator('.xjc-seg button:has-text("从里面随机")').click();
+  await ed.locator('.xjc-btn:has-text("＋ 加一段")').click();
+  await ed.locator('.xjc-part').nth(1).locator('.xjc-part-hd input').fill('主题');
+  await ed.locator('.xjc-part').nth(1).locator('.xjc-btn:has-text("＋ 选提示词")').click();
+  await page.locator('.xjc-sheet').last().locator('input[placeholder="搜标题 / 内容"]').fill('深巷');
+  await page.locator('.xjc-sheet').last().locator('label.xjc-check:has-text("深巷塔罗屋") input').check();
+  await page.locator('.xjc-sheet').last().locator('.xjc-sheet-ft .xjc-btn:has-text("确定")').click();
+  await ed.locator('.xjc-part').nth(1).locator('.xjc-btn[title="这一段上移"]').click();
+  ok((await ed.locator('.xjc-part').nth(0).locator('.xjc-part-hd input').inputValue()) === '主题' && await ed.locator('.xjc-part').nth(0).locator('.xjc-field:has(> .lb:text-is("这一段"))').count() === 0, '分段能调顺序；只有一条的段没有「随机」可选');
+  await ed.locator('.xjc-sheet-ft .xjc-btn:has-text("保存并试生成")').click();
+  await waitResult(page);
+  const segBrief = () => page.evaluate(async () => { const r = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0]; return { u: r.request[0].messages.map(m => m.content).join('\n'), snap: r.snapshot, title: r.title }; });
+  let sb = await segBrief();
+  const forms = ['三张牌阵', '凯尔特十字', '单张抽牌'].filter(t => sb.u.includes(`【牌阵 · ${t}】`));
+  ok(!sb.u.includes('【任务') && sb.u.includes('写成同一篇') && sb.u.indexOf('【主题 · 深巷塔罗屋】') >= 0 && sb.u.indexOf('【主题 · 深巷塔罗屋】') < sb.u.indexOf('【牌阵 · ') && forms.length === 1, `几条提示词合成同一篇（不再是任务 1、任务 2），按段的顺序，「牌阵」段只抽了一种（${forms}）`);
+  ok((await page.textContent('.xjc-combo-card .xjc-chips')).includes('随机抽 1 / 3') && (await page.textContent('.xjc-combo-card .xjc-pickrow')).includes('随机 1 条'), '舞台卡片显示「牌阵 随机抽 1 / 3」和「这次抽」');
+  await page.click('.xjc-combo-card .xjc-pickrow .xjc-btn:has-text("指定")');
+  ok(await page.locator('.xjc-sheet .xjc-sec:has-text("牌阵 · 平时随机抽 1 条")').count() === 1, '「这次抽」按段列出');
+  await page.click('.xjc-sheet .xjc-item:has(.t:text-is("凯尔特十字"))');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("用这 1 条")');
+  await page.click('.xjc-actions .pri');
+  await waitResult(page);
+  sb = await segBrief();
+  ok(sb.u.includes('【牌阵 · 凯尔特十字】') && !sb.u.includes('【牌阵 · 三张牌阵】') && !sb.u.includes('【牌阵 · 单张抽牌】') && sb.snap.randomsForced, '「这次抽」指定段里的一条，就用这一条');
+  await page.click('.xjc-combo-card .xjc-pickrow .xjc-btn:has-text("改回随机")');
+  // 接着写 / 追问：带上前文，沿用这一篇抽到的牌阵
+  const prevTitle = sb.title;
+  await page.click('.xjc-ops .xjc-btn:has-text("接着写 / 追问")');
+  await page.click('.xjc-sheet .xjc-seg button:text-is("追问")');
+  await page.fill('.xjc-sheet .xjc-field:has(> .lb:text-is("这次的要求")) textarea', '那逆位呢？');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("出一篇")');
+  await waitResult(page);
+  sb = await segBrief();
+  ok(sb.snap.follow?.mode === 'ask' && sb.u.includes('接着问：那逆位呢？') && sb.u.includes(`《${prevTitle}》`) && sb.u.includes('【牌阵 · 凯尔特十字】'), '追问：带上上一篇的正文和问题，沿用上一篇抽到的牌阵');
+  ok((await page.textContent('.xjc-result-hd .kind')).includes(`追问《${prevTitle}》`), '结果卡上写着追问的是哪一篇');
+  await page.click('.xjc-ops .xjc-btn:has-text("接着写 / 追问")');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("出一篇")');
+  await waitResult(page);
+  const thread = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.recent[0].thread?.length);
+  sb = await segBrief();
+  ok(thread === 2 && sb.snap.follow?.mode === 'write' && sb.u.includes(`《${prevTitle}》`), `接着写：可以一直往下接，前文带着前面 ${thread} 篇`);
+  await page.click('.xjc-ops .xjc-btn:has-text("再来一条")');
+  await waitResult(page);
+  sb = await segBrief();
+  ok(sb.snap.follow?.mode === 'write' && sb.u.includes('接着最后这一篇往下写'), '接着写出来的那篇「再来一条」，还是接着同一篇重写');
+  await page.evaluate(async () => { const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js'); s.state.combos = s.state.combos.filter(c => c.name !== '塔罗分段'); await s.save('combos'); await s.setSetting({ currentComboId: 'c_store', stagePick: null }); });
+  await page.click('.xjc-tabs button[data-v="library"]');
   const tarot = await page.evaluate(async () => {
     const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
     const s = await import(base + 'store.js');
     const g = await import(base + 'gen.js');
-    const combo = { ...s.state.combos.find(x => x.id === 'c_store'), promptIds: [], random: { count: 1, include: [], exclude: [], groups: ['prompts/塔罗形式'] }, output: { mode: 'text' } };
+    const combo = { ...s.state.combos.find(x => x.id === 'c_store'), parts: [{ id: 'pt_t', name: '牌阵', items: ['g:塔罗形式'], pick: 1 }], random: { count: 0, include: [], exclude: [], groups: [] }, output: { mode: 'text' } };
     const seen = new Set();
     for (let i = 0; i < 3; i++) {
       const r = await g.generateTheater(combo, {});
@@ -310,7 +360,7 @@ async function desktop(browser) {
     await s.save('prompts');
     return { bad: 0, seen: seen.size };
   });
-  ok(tarot.bad === 0, `随机「从分组抽」：每次只从提示词库的「塔罗形式」组里抽一种（3 次抽到 ${tarot.seen} 种）`);
+  ok(tarot.bad === 0, `整组放进一段、随机抽 1：每次只用「塔罗形式」组里的一种（3 次抽到 ${tarot.seen} 种）`);
 
   // 3d. 内置指令可以改：改了「纯文字」的输出要求，发给模型的就是改过的；恢复默认后回到原样
   await page.click('.xjc-tabs button[data-v="settings"]');
@@ -454,6 +504,15 @@ async function desktop(browser) {
   await page.waitForFunction(() => document.querySelectorAll('#chat .mes .xjc-tail-card').length >= 2 && !document.querySelector('.xjc-tail-busy'), null, { timeout: 30000 });
   ok(true, '消息按钮出了一篇');
   ok(JSON.stringify(lastCall().messages).includes('楼层附加要求测试'), '面具按钮先问附加要求，填的内容发给了模型');
+  // 7a. 楼层里的「接着写 / 追问」：小输入框，新的一篇挂在同一楼
+  const nTail = await page.locator('#chat .mes .xjc-tail-card').count();
+  const tailCard = page.locator('#chat .mes .xjc-tail-card').last();
+  await tailCard.locator('.xjc-tb[title="接着写 / 追问"]').click();
+  await tailCard.locator('.xjc-tail-follow textarea').fill('楼层追问测试');
+  await tailCard.locator('.xjc-tail-fb:text-is("追问")').click();
+  await page.waitForFunction(n => document.querySelectorAll('#chat .mes .xjc-tail-card').length > n && !document.querySelector('.xjc-tail-busy'), nTail, { timeout: 30000 });
+  const tailAsk = JSON.stringify(lastCall().messages);
+  ok(tailAsk.includes('接着问：楼层追问测试') && !tailAsk.includes('【接在聊天后面】'), '楼层里追问：带上那一篇和问题，挂在同一楼');
   await page.screenshot({ path: `${SHOTS}/d-07-chat-tail.png` });
 
   // 7b. 换主题：面板、聊天卡片、iframe 正文一起换，不用重开
@@ -534,7 +593,7 @@ async function desktop(browser) {
   const [ch2] = await Promise.all([page.waitForEvent('filechooser'), page.click('.xjc-sheet .xjc-btn:has-text("选文件")')]);
   await ch2.setFiles(darkFile);
   await sleep(500);
-  const dark = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.name === '午夜电台'); return c && { n: c.promptIds.length, mode: c.output.mode, tags: c.tags }; });
+  const dark = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.name === '午夜电台'); return c && { n: c.parts.flatMap(pt => pt.items).length, mode: c.output.mode, tags: c.tags }; });
   ok(dark && dark.n === 2 && dark.mode === 'mixed' && dark.tags.includes('暗柜'), '暗柜档案导入成两条提示词 + 一个小剧场');
 
   // 7d2. 舞台选小剧场：点卡片弹列表，能搜索，点一行设为当前
@@ -549,14 +608,14 @@ async function desktop(browser) {
   // 7e. 删提示词时从小剧场里摘掉引用
   const cleaned = await page.evaluate(async () => {
     const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state;
-    return s.combos.find(x => x.name === '午夜电台').promptIds[0];
+    return s.combos.find(x => x.name === '午夜电台').parts[0].items[0].slice(2);
   });
   await page.click('.xjc-view[data-view=library] .xjc-seg button:has-text("提示词")');
   await page.click('.xjc-view[data-view=library] .xjc-item:has-text("午夜电台 · 剧情指令")');
-  await page.click('.xjc-sheet .xjc-btn:has-text("删除")');
+  await page.click('.xjc-sheet .xjc-btn[title="删除"]');
   await page.locator('.xjc-sheet').last().locator('.xjc-btn.danger').click();
   await sleep(300);
-  const refs = await page.evaluate(async id => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.combos.find(x => x.name === '午夜电台').promptIds.includes(id), cleaned);
+  const refs = await page.evaluate(async id => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.combos.find(x => x.name === '午夜电台').parts.some(pt => pt.items.includes(`p:${id}`)), cleaned);
   ok(!refs, '删掉的提示词从小剧场里摘掉了');
 
   // 7f. 写回记忆（世界书）+ 走酒馆预设
@@ -728,7 +787,7 @@ async function desktop(browser) {
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
     const n = await d.importBundle({ app: 'float.xiaojuchang', version: 1, prompts: [{ id: 'p_x', title: 'Float 来的', tags: ['场景'], content: '一段测试' }], combos: [{ id: 'c_x', name: 'Float 组合', promptIds: ['p_x'], memory: { mode: 'host', rounds: 6 }, writeBack: true, rawChannel: true, output: { mode: 'text' } }] });
     const c = s.state.combos.find(x => x.name === 'Float 组合');
-    return { n, ctx: c && c.context, hasRaw: c && ('rawChannel' in c), linked: c && s.state.prompts.some(p => p.id === c.promptIds[0] && p.title === 'Float 来的') };
+    return { n, ctx: c && c.context, hasRaw: c && ('rawChannel' in c), linked: c && s.state.prompts.some(p => `p:${p.id}` === c.parts[0]?.items[0] && p.title === 'Float 来的') };
   });
   ok(imported.n === 2 && imported.ctx === null && !imported.hasRaw && imported.linked, 'Float 整包导入并换算字段（「跟宿主记忆」→ 跟随全局）');
 

@@ -2,7 +2,7 @@
 // 存在 message.extra.xjc（跟着 swipe 走），不进 mes 正文，所以不会发给模型
 import { ctx, el, uid, byId, toast, fail, copyText } from './util.js';
 import { state, save } from './store.js';
-import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, resultPlainText, KIND_LABEL, kindOf } from './gen.js';
+import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, followAgain, resultPlainText, KIND_LABEL, kindOf } from './gen.js';
 import { mountFrame, markTheme } from './frame.js';
 import { openViewer } from './ui.js';
 import { currentChar } from './host.js';
@@ -57,7 +57,7 @@ function pickCombo() {
   if (t.pick === 'combo') return byId(state.combos, t.comboId) || weightedRandomCombo();
   return weightedRandomCombo();
 }
-export async function generateFor(mesId, { combo, extra } = {}) {
+export async function generateFor(mesId, { combo, extra, follow } = {}) {
   const c = ctx();
   const msg = c.chat[mesId];
   if (!msg || msg.is_system) return;
@@ -70,7 +70,8 @@ export async function generateFor(mesId, { combo, extra } = {}) {
   renderTail(mesId);
   const tail = instr('tail');
   try {
-    const result = await generateTheater(use, { uptoIndex: mesId, extra: [tail, extra].filter(Boolean).join('\n'), signal: ctrl.signal });
+    // 接着写 / 追问时接的是前一篇小剧场，不再要求「和这条消息有关」
+    const result = await generateTheater(use, { uptoIndex: mesId, extra: [follow ? '' : tail, extra].filter(Boolean).join('\n'), follow, signal: ctrl.signal });
     if (!result || ctrl.signal.aborted) return;
     running.delete(msg);
     state.settings.played = (Number(state.settings.played) || 0) + 1;
@@ -131,7 +132,27 @@ function tailCard(mesId, theater) {
     ],
     onAction: text => generateFor(currentIndex(), { combo: theater.comboCopy, extra: continueExtra(theater, text) }),
   }));
-  tb('fa-solid fa-rotate-right', '再来一条（同一套）', () => generateFor(currentIndex(), { combo: theater.comboCopy || undefined }));
+  tb('fa-solid fa-rotate-right', '再来一条（同一套）', () => generateFor(currentIndex(), { combo: theater.comboCopy || undefined, follow: followAgain(theater) || undefined }));
+  // 接着写 / 追问：标题栏下面展开一个小输入框，新的一篇挂在同一楼
+  const follow = el('div', 'xjc-tail-follow');
+  follow.hidden = true;
+  const ta = el('textarea');
+  ta.rows = 2;
+  ta.placeholder = '接着写：想看什么（可以不写）；追问：想问什么';
+  const go = mode => {
+    const text = ta.value.trim();
+    if (mode === 'ask' && !text) { toast('写一下想问什么'); return; }
+    if (!theater.comboCopy) { toast('这篇的配置已经找不到了'); return; }
+    follow.hidden = true;
+    ta.value = '';
+    generateFor(currentIndex(), { combo: theater.comboCopy, follow: { of: theater, mode, text } });
+  };
+  const fb = (label, fn, cls = '') => { const b = el('button', `xjc-tail-fb ${cls}`, label); b.type = 'button'; b.onclick = e => { e.stopPropagation(); fn(); }; return b; };
+  const fops = el('div', 'xjc-tail-fops');
+  fops.append(fb('接着写', () => go('write'), 'pri'), fb('追问', () => go('ask')), fb('取消', () => { follow.hidden = true; }));
+  follow.append(ta, fops);
+  follow.addEventListener('click', e => e.stopPropagation());
+  tb('fa-solid fa-reply', '接着写 / 追问', () => { follow.hidden = !follow.hidden; if (!follow.hidden) ta.focus(); });
   const favBtn = tb(heart(isFavorite(theater)), '收藏', b => { const on = toggleFavorite(theater); b.innerHTML = `<i class="${heart(on)}"></i>`; b.classList.toggle('on', on); });
   favBtn.classList.toggle('on', isFavorite(theater));
   tb('fa-solid fa-trash-can', '删除', async () => {
@@ -154,7 +175,7 @@ function tailCard(mesId, theater) {
   });
   body.hidden = !isOpen();
   card.classList.toggle('closed', body.hidden);
-  card.append(hd, body);
+  card.append(hd, follow, body);
   if (!body.hidden) requestAnimationFrame(mount);
   return card;
 }

@@ -48,7 +48,7 @@ const DEFAULT_MACROS = [
 const ctxRecent = rounds => ({ chat: "recent", rounds, worldInfo: true, summary: true });
 const ctxNone = () => ({ chat: "none", rounds: 12, worldInfo: true, summary: false });
 const out = (mode, wrapTag = "") => ({ mode, wrapTag, length: "default", customChars: 900, style: "", staged: null });
-const combo = (id, name, tags, preambleId, promptIds, random, output, context, weight) => ({ id, name, tags, preambleId, promptIds, random, output, context, who: "", whoText: "", channel: "", writeBack: null, api: "", weight });
+const combo = (id, name, tags, preambleId, promptIds, random, output, context, weight) => ({ id, name, tags, preambleId, parts: [{ id: `pt_${id}`, name: "", items: promptIds.map(p => `p:${p}`), pick: 0 }], random, output, context, who: "", whoText: "", channel: "", writeBack: null, api: "", weight });
 
 const DEFAULT_COMBOS = [
   combo("c_store", "深夜便利店偶遇", ["日常", "心动", "雨"], "pre_strict", ["p_scene_store", "p_if_wait", "p_form_novel"], { count: 1, include: ["细节"], exclude: [] }, out("text", "theater"), null, 3),

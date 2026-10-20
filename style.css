@@ -796,3 +796,22 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
 .xjc-pickrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--xjc-ui-line); font-size: .88em; }
 .xjc-pickrow .lb { opacity: .6; flex: none; }
 .xjc-pickrow .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 只有图标的按钮 */
+.xjc-btn.icon { padding: 0; width: 34px; flex: none; }
+.xjc-btn.sm.icon { width: 28px; }
+.xjc-btn.icon i { font-size: .95em; }
+/* 小剧场编辑：提示词分段 */
+.xjc-parts { display: flex; flex-direction: column; gap: 10px; }
+.xjc-part { border: 1px solid var(--xjc-ui-line); border-radius: 10px; padding: 10px; }
+.xjc-part-hd { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.xjc-part-hd input { flex: 1; min-width: 0; }
+.xjc-part > .xjc-row { margin-bottom: 4px; }
+.xjc-part .xjc-field { margin: 8px 0 0; }
+.xjc-parts > .xjc-btn { align-self: flex-start; }
+/* 楼层里的「接着写 / 追问」 */
+.xjc-tail-follow { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.xjc-tail-follow textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: .92em; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--xjc-ui-line); background: transparent; color: inherit; }
+.xjc-tail-fops { display: flex; gap: 6px; justify-content: flex-end; }
+.xjc-tail-fb { font: inherit; font-size: .85em; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--xjc-ui-line); background: transparent; color: inherit; cursor: pointer; }
+.xjc-tail-fb.pri { background: var(--xjc-ui-acc); border-color: var(--xjc-ui-acc); color: var(--xjc-ui-on); }
+.xjc-tail-follow[hidden] { display: none; }
