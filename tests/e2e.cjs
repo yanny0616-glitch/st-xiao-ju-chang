@@ -37,7 +37,7 @@ async function setupData(page) {
     }
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
     for (const k of [...s.LIBRARY, ...s.HEAVY]) s.state[k] = [];
-    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, auto: false, button: true } };
+    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, enabled: false, auto: false, button: true } };
     s.seedDefaults(false);
     await s.saveAll();
     c.saveSettingsDebounced();
@@ -213,7 +213,14 @@ async function desktop(browser) {
   await page.screenshot({ path: `${SHOTS}/d-06-viewer.png` });
   await page.click('.xjc-viewer >> text=‹ 返回');
 
-  // 6. 挂到聊天
+  // 6. 楼层功能默认关：没有「挂到聊天」、消息菜单里没有面具按钮；打开后才有
+  await page.click('.xjc-tabs button[data-v="stage"]');
+  ok(!(await page.locator('.xjc-ops >> text=挂到聊天').isVisible()), '楼层功能默认关：结果里没有「挂到聊天」');
+  ok(await page.evaluate(() => { const b = document.querySelector('#chat .mes .xjc-mes-btn'); return !!b && getComputedStyle(b).display === 'none'; }), '楼层功能默认关：消息菜单里没有面具按钮');
+  ok(await page.locator('.xjc-view[data-view="fav"] .xjc-seg').count() === 0, '楼层功能默认关：收藏页不显示「本聊天」');
+  await page.click('.xjc-tabs button[data-v="settings"]');
+  await page.click('.xjc-view[data-view=settings] .xjc-seg button:has-text("聊天内")');
+  await page.click('.xjc-toggle:has-text("在楼层里显示小剧场")');
   await page.click('.xjc-tabs button[data-v="stage"]');
   await page.click('.xjc-ops >> text=挂到聊天');
   await sleep(800);

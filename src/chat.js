@@ -193,7 +193,9 @@ export function renderAll() {
 
 // ── 接线 ──
 function syncButton() {
-  document.body.classList.toggle('xjc-no-mes-btn', !state.settings.tail.button);
+  const t = state.settings.tail;
+  document.body.classList.toggle('xjc-no-mes-btn', !(t.enabled && t.button));
+  document.body.classList.toggle('xjc-tail-off', !t.enabled);
 }
 function addButtonTo(container) {
   if (!container || container.querySelector('.xjc-mes-btn')) return;
@@ -208,7 +210,7 @@ export function initChat() {
   addButtonTo(document.querySelector('#message_template .extraMesButtons'));
   document.querySelectorAll('#chat .mes .extraMesButtons').forEach(addButtonTo);
   const style = el('style');
-  style.textContent = 'body.xjc-no-mes-btn .xjc-mes-btn{display:none!important}';
+  style.textContent = 'body.xjc-no-mes-btn .xjc-mes-btn,body.xjc-tail-off .xjc-attach{display:none!important}';
   document.head.appendChild(style);
   syncButton();
   document.addEventListener('xjc-settings', syncButton);
@@ -229,7 +231,7 @@ export function initChat() {
     const mesId = Number(id);
     renderTail(mesId);
     const t = state.settings.tail;
-    if (!t.auto || ['first_message', 'continue', 'impersonate'].includes(type)) return;
+    if (!t.enabled || !t.auto || ['first_message', 'continue', 'impersonate'].includes(type)) return;
     const m = ctx().chat[mesId];
     if (!m || m.is_user || m.is_system || m.extra?.xjc?.length) return;
     if (Math.random() * 100 >= (Number(t.chance) || 0)) return;

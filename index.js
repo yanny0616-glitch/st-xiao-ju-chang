@@ -28,19 +28,16 @@ function addSettingsDrawer() {
       </div>
       <div class="inline-drawer-content">
         <div class="xjc-drawer-row"><div class="menu_button menu_button_icon" id="xjc_open"><i class="fa-solid fa-masks-theater"></i><span>打开小剧场</span></div></div>
-        <label class="checkbox_label"><input type="checkbox" id="xjc_btn_toggle"><span>消息菜单里加面具按钮（为这条出一篇）</span></label>
-        <label class="checkbox_label"><input type="checkbox" id="xjc_auto_toggle"><span>AI 回复后自动出一篇小剧场</span></label>
-        <small>也可以从输入框左边的魔杖菜单打开。其余设置在面板的「设置」里。</small>
+        <label class="checkbox_label"><input type="checkbox" id="xjc_tail_toggle"><span>在楼层里显示小剧场（可选，消息菜单出一篇 / AI 回复后自动出）</span></label>
+        <small>平时从输入框左边的魔杖菜单打开小剧场。楼层功能的细项在面板的「设置 → 聊天内」。</small>
       </div>
     </div>`;
   host.appendChild(wrap);
   wrap.querySelector('#xjc_open').addEventListener('click', () => panel.open('stage'));
-  const btnT = wrap.querySelector('#xjc_btn_toggle');
-  const autoT = wrap.querySelector('#xjc_auto_toggle');
-  const sync = () => { btnT.checked = !!state.settings.tail.button; autoT.checked = !!state.settings.tail.auto; };
+  const tailT = wrap.querySelector('#xjc_tail_toggle');
+  const sync = () => { tailT.checked = !!state.settings.tail.enabled; };
   sync();
-  btnT.addEventListener('change', () => { setSetting({ tail: { ...state.settings.tail, button: btnT.checked } }); document.dispatchEvent(new CustomEvent('xjc-settings')); });
-  autoT.addEventListener('change', () => setSetting({ tail: { ...state.settings.tail, auto: autoT.checked } }));
+  tailT.addEventListener('change', () => { setSetting({ tail: { ...state.settings.tail, enabled: tailT.checked } }); document.dispatchEvent(new CustomEvent('xjc-settings')); panel.refresh(); });
   document.addEventListener('xjc-settings', sync);
 }
 

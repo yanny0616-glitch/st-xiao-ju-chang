@@ -247,7 +247,7 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
     ops.appendChild(btn('⤢ 全屏', () => viewResult(result), 'xjc-btn'));
     ops.appendChild(btn('挂到聊天', async () => {
       try { const at = await attachToLatest(result); toast(`已挂到第 ${at} 楼下面`, 'success'); } catch (e) { fail(e); }
-    }, 'xjc-btn'));
+    }, 'xjc-btn xjc-attach'));
     ops.appendChild(btn('复制', async () => toast((await copyText(`${result.title}\n\n${resultPlainText(result)}`)) ? '已复制正文' : '复制失败'), 'xjc-btn ghost'));
     ops.appendChild(btn('ⓘ', () => openSheet('这一篇用了什么', b => {
       b.appendChild(snapshotInfo(result));
@@ -757,7 +757,10 @@ function renderFav() {
   const v = views.fav;
   v.innerHTML = '';
   const theaters = chatTheaters();
-  v.appendChild(seg([{ v: 'fav', l: `收藏 ${state.favorites.length}` }, { v: 'chat', l: `本聊天 ${theaters.length}` }], favTab, x => { favTab = x; renderFav(); }));
+  // 楼层功能关着、这个聊天里也没挂过，就不显示「本聊天」
+  const showChat = state.settings.tail.enabled || theaters.length > 0;
+  if (!showChat) favTab = 'fav';
+  if (showChat) v.appendChild(seg([{ v: 'fav', l: `收藏 ${state.favorites.length}` }, { v: 'chat', l: `本聊天 ${theaters.length}` }], favTab, x => { favTab = x; renderFav(); }));
   const box = el('div');
   box.style.marginTop = '12px';
   v.appendChild(box);
@@ -926,7 +929,12 @@ function editApi(row) {
 function setChat(box) {
   const t = S().tail;
   const put = patch => setSetting({ tail: { ...S().tail, ...patch } });
-  box.appendChild(el('p', 'xjc-hint', '小剧场可以挂在聊天消息下面：用到截至那条消息的聊天记录，只是给你看的，不会发给模型、不影响后续聊天。存在那条消息里，换一个回复（swipe）就跟着换。'));
+  box.appendChild(el('p', 'xjc-hint', '可选功能，默认关闭。打开后小剧场可以挂在聊天楼层下面：用到截至那条消息的聊天记录，只是给你看的，不会发给模型、不影响后续聊天。存在那条消息里，换一个回复（swipe）就跟着换。'));
+  const more = el('div');
+  box.appendChild(toggle('在楼层里显示小剧场', t.enabled, v => { put({ enabled: v }); more.hidden = !v; document.dispatchEvent(new CustomEvent('xjc-settings')); }));
+  box.appendChild(more);
+  more.hidden = !t.enabled;
+  box = more;
   box.appendChild(toggle('消息的「…」菜单里加面具按钮（点一下为这条出一篇）', t.button, v => { put({ button: v }); document.dispatchEvent(new CustomEvent('xjc-settings')); }));
   box.appendChild(toggle('AI 回复后自动出一篇', t.auto, v => put({ auto: v })));
   const chance = input(t.chance, '', 'number');
