@@ -85,13 +85,12 @@
 .xjc-chip.on { border-color: var(--xjc-ui-acc); color: var(--xjc-ui-acc); }
 .xjc-chip b { font-weight: 600; opacity: .6; margin-right: 2px; }
 .xjc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.xjc-scrollx { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
 .xjc-field { display: block; margin: 0 0 12px; }
 .xjc-field > .lb { display: block; font-size: .82em; opacity: .75; margin-bottom: 5px; }
 /* 输入框：不吃酒馆主题和系统自带外观（iOS 默认灰底），颜色只跟小剧场主题 */
 .xjc-root input[type=text], .xjc-root input[type=number], .xjc-root input[type=password], .xjc-root input[type=url], .xjc-root input[type=search], .xjc-root select, .xjc-root textarea {
     -webkit-appearance: none; appearance: none;
-    width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; font: inherit; font-size: calc(15px * var(--xjc-fs, 1)); margin: 0;
+    width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; font: inherit; font-size: calc(14px * var(--xjc-fs, 1)) !important; margin: 0;
     border: 1px solid var(--xjc-ui-line);
     background-color: var(--xjc-ui-chat) !important; color: var(--xjc-ui-ink) !important;
     box-shadow: none; opacity: 1; filter: none; text-shadow: none; outline: none;
@@ -105,10 +104,7 @@
     background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50% !important;
     background-size: 5px 5px, 5px 5px !important; background-repeat: no-repeat !important;
 }
-@media (pointer: coarse) {
-    /* iOS 输入框小于 16px 时点进去会放大页面 */
-    .xjc-root input[type=text], .xjc-root input[type=number], .xjc-root input[type=password], .xjc-root input[type=url], .xjc-root input[type=search], .xjc-root select, .xjc-root textarea { font-size: max(16px, calc(15px * var(--xjc-fs, 1))) !important; }
-}
+/* 输入框字号跟界面字号走；酒馆和 TauriTavern 的 viewport 都是 maximum-scale=1，iOS 点进去不会放大页面 */
 .xjc-root textarea { resize: vertical; line-height: 1.5; min-height: 80px; }
 .xjc-root select option { background: var(--xjc-ui-bg); color: var(--xjc-ui-ink); }
 .xjc-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; margin: 0 0 12px; }
@@ -131,7 +127,9 @@
 /* ── 舞台 ── */
 .xjc-cast { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--xjc-ui-line); border-radius: 12px; background: var(--xjc-ui-chat); }
 .xjc-stage-notice:not(:empty) { margin-bottom: 14px; }
-.xjc-combo-card { border: 1px solid var(--xjc-ui-line); border-radius: 12px; padding: 12px; margin-top: 10px; }
+.xjc-combo-card { border: 1px solid var(--xjc-ui-line); border-radius: 12px; padding: 12px; margin-top: 10px; cursor: pointer; }
+.xjc-item.on { border-color: var(--xjc-ui-acc); }
+.xjc-item.on .t { color: var(--xjc-ui-acc); }
 .xjc-combo-card .nm { font-weight: 700; font-size: 1.05em; margin-bottom: 8px; }
 .xjc-extra { margin-top: 10px; }
 .xjc-actions {
@@ -298,8 +296,6 @@
 [data-xjc-theme=magazine] .xjc-btn.ghost { border-color: transparent; text-decoration: underline; text-underline-offset: 3px; }
 [data-xjc-theme=magazine] .xjc-btn.danger { border-color: #b3261e; color: #b3261e; }
 [data-xjc-theme=magazine] input, [data-xjc-theme=magazine] select, [data-xjc-theme=magazine] textarea, [data-xjc-theme=magazine] .xjc-pre, [data-xjc-theme=magazine] .xjc-th, [data-xjc-theme=magazine] .xjc-th .pv { border-radius: 0 !important; }
-[data-xjc-theme=magazine] .xjc-scrollx .xjc-chip { border: 0; border-radius: 0; padding: 4px 0; margin-right: 8px; font-family: var(--xjc-serif); font-size: calc(14px * var(--xjc-fs, 1)); border-bottom: 2px solid transparent; }
-[data-xjc-theme=magazine] .xjc-scrollx .xjc-chip.on { color: var(--xjc-ui-acc); border-bottom-color: var(--xjc-ui-acc); }
 [data-xjc-theme=magazine] .xjc-combo-card { border: 0; border-bottom: 1px solid var(--xjc-ui-line); border-radius: 0; padding: 12px 0 14px; }
 [data-xjc-theme=magazine] .xjc-combo-card .nm { font-family: var(--xjc-serif); font-size: calc(21px * var(--xjc-fs, 1)); }
 [data-xjc-theme=magazine] .xjc-combo-card .nm::before { content: "本期 · "; font-family: var(--xjc-sans); font-size: calc(11px * var(--xjc-fs, 1)); letter-spacing: .2em; font-weight: 600; opacity: .55; vertical-align: middle; }
@@ -355,9 +351,6 @@
 [data-xjc-theme=sticky] .xjc-btn.ghost { background: rgba(255, 255, 255, .5); box-shadow: none; }
 [data-xjc-theme=sticky] .xjc-btn.danger { color: #b3261e; }
 [data-xjc-theme=sticky] input, [data-xjc-theme=sticky] select, [data-xjc-theme=sticky] textarea { border-color: transparent !important; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .08); border-radius: 10px !important; }
-[data-xjc-theme=sticky] .xjc-scrollx { padding: 4px 2px 8px; }
-[data-xjc-theme=sticky] .xjc-scrollx .xjc-chip { border: 0; background: #fff; box-shadow: 0 1px 0 rgba(0, 0, 0, .1); padding: 5px 12px; font-size: calc(13px * var(--xjc-fs, 1)); }
-[data-xjc-theme=sticky] .xjc-scrollx .xjc-chip.on { background: #2b2622; color: #fff; }
 [data-xjc-theme=sticky] .xjc-combo-card { position: relative; border: 0; border-radius: 2px; background: #ffe37a; padding: 16px 16px 14px; margin: 16px 4px 0; transform: rotate(.8deg); box-shadow: 0 5px 12px rgba(0, 0, 0, .12); }
 [data-xjc-theme=sticky] .xjc-combo-card::before { content: ""; position: absolute; left: 50%; top: -9px; width: 60px; height: 16px; margin-left: -30px; background: rgba(255, 255, 255, .55); transform: rotate(-2deg); }
 [data-xjc-theme=sticky] .xjc-combo-card .nm { font-size: calc(17px * var(--xjc-fs, 1)); font-weight: 800; }
@@ -434,12 +427,11 @@
 [data-xjc-theme=terminal] input, [data-xjc-theme=terminal] select, [data-xjc-theme=terminal] textarea, [data-xjc-theme=terminal] .xjc-pre, [data-xjc-theme=terminal] .xjc-th, [data-xjc-theme=terminal] .xjc-th .pv, [data-xjc-theme=terminal] .xjc-chip { border-radius: 0 !important; }
 [data-xjc-theme=terminal] .xjc-toggle input { border-radius: 0; background-color: transparent; border: 1px solid var(--xjc-ui-line); background-image: linear-gradient(var(--xjc-ui-line), var(--xjc-ui-line)); background-size: 12px 10px; }
 [data-xjc-theme=terminal] .xjc-toggle input:checked { border-color: var(--xjc-ui-acc); background-image: linear-gradient(var(--xjc-ui-acc), var(--xjc-ui-acc)); background-color: transparent; }
-[data-xjc-theme=terminal] .xjc-scrollx .xjc-chip.on { background: var(--xjc-ui-acc); color: var(--xjc-ui-on); border-color: var(--xjc-ui-acc); }
 [data-xjc-theme=terminal] .xjc-combo-card, [data-xjc-theme=terminal] .xjc-result { position: relative; border-radius: 0; background: transparent; margin-top: 18px; }
 [data-xjc-theme=terminal] .xjc-combo-card::before, [data-xjc-theme=terminal] .xjc-result::before, [data-xjc-theme=terminal] .xjc-cards .xjc-item::before {
     position: absolute; top: -8px; left: 10px; background: var(--xjc-ui-bg); padding: 0 5px; font-size: calc(11px * var(--xjc-fs, 1)); line-height: 16px;
 }
-[data-xjc-theme=terminal] .xjc-combo-card::before { content: "[ 已选 ]"; color: var(--xjc-ui-acc); }
+[data-xjc-theme=terminal] .xjc-combo-card::before { content: "[ 当前 ]"; color: var(--xjc-ui-acc); }
 [data-xjc-theme=terminal] .xjc-result::before { content: attr(data-stdout); color: var(--xjc-ui-amb); }
 [data-xjc-theme=terminal] .xjc-combo-card .nm { font-weight: 400; color: #fff; }
 [data-xjc-theme=terminal] .xjc-combo-card .nm::before { content: "$ "; color: var(--xjc-ui-acc); }
@@ -510,8 +502,6 @@
 [data-xjc-theme=script] input, [data-xjc-theme=script] select, [data-xjc-theme=script] textarea, [data-xjc-theme=script] .xjc-pre, [data-xjc-theme=script] .xjc-th, [data-xjc-theme=script] .xjc-th .pv { border-radius: 0 !important; border-color: var(--xjc-ui-ink) !important; }
 [data-xjc-theme=script] .xjc-toggle input { border-radius: 0; background-color: #fff; border: 1px solid var(--xjc-ui-ink); background-image: linear-gradient(var(--xjc-ui-ink), var(--xjc-ui-ink)); background-size: 13px 13px; background-position: 2px 50%; }
 [data-xjc-theme=script] .xjc-toggle input:checked { background-color: #fff; background-image: linear-gradient(var(--xjc-ui-acc), var(--xjc-ui-acc)); background-position: calc(100% - 2px) 50%; }
-[data-xjc-theme=script] .xjc-scrollx .xjc-chip { border: 0; border-radius: 0; letter-spacing: .1em; padding: 4px 2px; margin-right: 10px; border-bottom: 2px solid transparent; }
-[data-xjc-theme=script] .xjc-scrollx .xjc-chip.on { color: var(--xjc-ui-ink); font-weight: 700; border-bottom-color: var(--xjc-ui-acc); }
 [data-xjc-theme=script] .xjc-combo-card { border: 0; border-top: 1px solid var(--xjc-ui-ink); border-bottom: 1px solid var(--xjc-ui-ink); border-radius: 0; text-align: center; padding: 12px 0; }
 [data-xjc-theme=script] .xjc-combo-card::before { content: "第 " attr(data-scene) " 场"; display: block; font-size: calc(12px * var(--xjc-fs, 1)); letter-spacing: .3em; opacity: .55; margin-bottom: 4px; }
 [data-xjc-theme=script] .xjc-combo-card .nm { letter-spacing: .25em; font-size: calc(16px * var(--xjc-fs, 1)); }
@@ -689,7 +679,6 @@
 [data-xjc-theme=xuan] .xjc-combo-card .nm::before { content: "【"; color: var(--xjc-ui-acc); }
 [data-xjc-theme=xuan] .xjc-combo-card .nm::after { content: "】"; color: var(--xjc-ui-acc); }
 [data-xjc-theme=xuan] .xjc-chip { border-radius: 2px; border-color: #c9bb9f; }
-[data-xjc-theme=xuan] .xjc-scrollx .xjc-chip.on { background: var(--xjc-ui-acc); color: #f8f3e7; border-color: var(--xjc-ui-acc); }
 [data-xjc-theme=xuan] .xjc-result { border: 0; border-radius: 0; background: transparent; }
 [data-xjc-theme=xuan] .xjc-result-hd { text-align: center; padding: 6px 0 0; }
 [data-xjc-theme=xuan] .xjc-result-hd .kind { color: var(--xjc-ui-acc); opacity: 1; letter-spacing: .2em; }
@@ -729,7 +718,7 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
 /* 杂项 */
 .xjc-path { font-size: .72em; opacity: .4; margin-top: 3px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
 .xjc-check .d.full { display: block; -webkit-line-clamp: unset; overflow: visible; white-space: pre-wrap; opacity: .85; }
-.xjc-root textarea.xjc-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: calc(13px * var(--xjc-fs, 1)); line-height: 1.5; white-space: pre; overflow-x: auto; }
+.xjc-root textarea.xjc-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: calc(13px * var(--xjc-fs, 1)) !important; line-height: 1.5; white-space: pre; overflow-x: auto; }
 
 /* ── 自带主题 · 手机 ── */
 @media (max-width: 700px) {

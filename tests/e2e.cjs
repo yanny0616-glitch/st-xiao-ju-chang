@@ -138,7 +138,8 @@ async function desktop(browser) {
   await page.screenshot({ path: `${SHOTS}/d-02-result-text.png` });
 
   // 2. 换塔罗屋（HTML 交互），点 iframe 里的 data-action 续写
-  await page.click('.xjc-scrollx >> text=塔罗屋');
+  await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
+  await page.locator('.xjc-sheet .xjc-item', { hasText: '塔罗屋' }).first().click();
   await page.click('.xjc-actions .pri');
   await waitResult(page);
   const fr = page.frameLocator('.xjc-result iframe');
@@ -191,7 +192,8 @@ async function desktop(browser) {
   ok(test.auth === 'Bearer sk-test-123' && test.model === 'mock-large', '自配 API 经酒馆后端转发，带上密钥和模型');
   await page.click('.xjc-sheet-ft >> text="保存"');
   await page.click('.xjc-tabs button[data-v="stage"]');
-  await page.click('.xjc-scrollx >> text=深夜便利店偶遇');
+  await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
+  await page.locator('.xjc-sheet .xjc-item', { hasText: '深夜便利店偶遇' }).first().click();
   await page.click('.xjc-actions .pri');
   let sawStreaming = false;
   for (let i = 0; i < 40; i++) {
@@ -317,6 +319,15 @@ async function desktop(browser) {
   await sleep(500);
   const dark = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.name === '午夜电台'); return c && { n: c.promptIds.length, mode: c.output.mode, tags: c.tags }; });
   ok(dark && dark.n === 2 && dark.mode === 'mixed' && dark.tags.includes('暗柜'), '暗柜档案导入成两条提示词 + 一个小剧场');
+
+  // 7d2. 舞台选小剧场：点卡片弹列表，能搜索，点一行设为当前
+  await page.click('.xjc-tabs button[data-v="stage"]');
+  await page.click('.xjc-combo-card .nm');
+  await page.fill('.xjc-sheet input[type=search]', '午夜');
+  const pickN = await page.locator('.xjc-sheet .xjc-item').count();
+  await page.locator('.xjc-sheet .xjc-item', { hasText: '午夜电台' }).click();
+  ok(pickN === 1 && (await page.textContent('.xjc-combo-card .nm')) === '午夜电台' && await page.locator('.xjc-sheet').count() === 0, `选小剧场列表能搜索（${pickN} 条），点了就换成当前`);
+  await page.click('.xjc-tabs button[data-v="library"]');
 
   // 7e. 删提示词时从小剧场里摘掉引用
   const cleaned = await page.evaluate(async () => {
@@ -460,8 +471,8 @@ async function mobile(browser) {
   await page.evaluate(() => document.querySelector('#chat .mes .xjc-tail-card')?.scrollIntoView());
   await sleep(500);
   await page.screenshot({ path: `${SHOTS}/m-08-chat-tail.png` });
-  const inputFont = await page.evaluate(() => { window.XiaoJuChang.open('stage'); return getComputedStyle(document.querySelector('.xjc-extra input')).fontSize; });
-  ok(inputFont === '16px', '输入框 16px，iOS 点进去不会放大页面');
+  const inputFont = await page.evaluate(() => { window.XiaoJuChang.open('stage'); return [getComputedStyle(document.querySelector('.xjc-extra input')).fontSize, document.querySelector('meta[name=viewport]')?.content || '']; });
+  ok(inputFont[0] === '14px' && /maximum-scale=1/.test(inputFont[1]), `手机输入框和正文一样大（${inputFont[0]}），viewport 禁止缩放所以 iOS 不会放大`);
   ok(errors.length === 0, `手机端没有页面错误${errors.length ? '：' + errors.join(' | ') : ''}`);
   await ctx.close();
 }

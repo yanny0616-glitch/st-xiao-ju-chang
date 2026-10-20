@@ -171,22 +171,63 @@ function renderPick() {
     box.appendChild(el('div', 'xjc-empty', '还没有小剧场，去「库」里建一个。'));
     return;
   }
+  // 和 Float 一样：舞台只放当前这一个，点卡片弹出列表换
   const cur = currentCombo();
-  const strip = el('div', 'xjc-scrollx');
-  for (const c of state.combos) {
-    const chip = el('button', 'xjc-chip' + (c.id === cur.id ? ' on' : ''), c.name);
-    chip.type = 'button';
-    chip.onclick = () => { setSetting({ currentComboId: c.id }); renderPick(); };
-    strip.appendChild(chip);
-  }
-  box.appendChild(strip);
   const card = el('div', 'xjc-combo-card');
   card.dataset.scene = String(state.combos.indexOf(cur) + 1);
+  card.title = '点一下换一个小剧场';
+  card.onclick = e => { if (!e.target.closest('.xjc-btn')) pickCombo(); };
   const row = el('div', 'xjc-row nowrap');
-  row.append(el('div', 'nm xjc-grow', cur.name), btn('编辑', () => editCombo(cur), 'xjc-btn sm ghost'));
+  row.append(el('div', 'nm xjc-grow', cur.name), btn('编辑', () => editCombo(cur), 'xjc-btn sm ghost'), btn('换一个 ›', pickCombo, 'xjc-btn sm'));
   card.append(row, comboChips(cur));
   box.appendChild(card);
-  requestAnimationFrame(() => strip.querySelector('.on')?.scrollIntoView({ block: 'nearest', inline: 'center' }));
+}
+
+/** 选小剧场：可搜索、按标签筛；点一行就设为当前 */
+function pickCombo() {
+  openSheet(`选小剧场（${state.combos.length}）`, (body, foot, closeIt) => {
+    let q = '', tag = '';
+    const curId = currentCombo()?.id;
+    if (state.combos.length > 6) {
+      const search = input('', '搜名字 / 标签');
+      search.type = 'search';
+      search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
+      body.appendChild(search);
+    }
+    const tags = allTags(state.combos);
+    const chips = el('div', 'xjc-chips');
+    chips.style.margin = '10px 0 4px';
+    if (tags.length) body.appendChild(chips);
+    const list = el('div', 'xjc-list');
+    list.style.marginTop = '8px';
+    body.appendChild(list);
+    const drawTags = () => {
+      chips.innerHTML = '';
+      for (const t of ['', ...tags]) {
+        const c = el('button', 'xjc-chip' + (tag === t ? ' on' : ''), t ? '#' + t : '全部');
+        c.type = 'button';
+        c.onclick = () => { tag = t; drawTags(); draw(); };
+        chips.appendChild(c);
+      }
+    };
+    const draw = () => {
+      list.innerHTML = '';
+      const shown = state.combos.filter(c => (!tag || (c.tags || []).includes(tag)) && (!q || (c.name + ' ' + (c.tags || []).join(' ')).toLowerCase().includes(q)));
+      if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的小剧场'));
+      for (const c of shown) {
+        const on = c.id === curId;
+        const it = itemRow(c.name, `${(c.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`, () => {
+          setSetting({ currentComboId: c.id }); closeIt(); renderPick();
+        }, on ? '当前' : '');
+        if (on) it.classList.add('on');
+        it.appendChild(btn('编辑', e => { e.stopPropagation(); closeIt(); editCombo(c); }, 'xjc-btn sm ghost'));
+        list.appendChild(it);
+      }
+    };
+    drawTags();
+    draw();
+    foot.appendChild(btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn'));
+  });
 }
 
 function renderRecent() {
