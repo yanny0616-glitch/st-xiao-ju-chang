@@ -147,6 +147,8 @@
 .xjc-item.on .t { color: var(--xjc-ui-acc); }
 .xjc-combo-card .nm { font-weight: 700; font-size: 1.05em; margin-bottom: 8px; }
 .xjc-extra { margin-top: 10px; }
+.xjc-extra-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: .85em; opacity: .8; }
+.xjc-extra textarea { min-height: 0; }
 .xjc-actions {
     position: sticky; bottom: -14px; z-index: 2; margin: 14px -14px 0; padding: 10px 14px 14px;
     background: linear-gradient(to bottom, transparent, var(--xjc-ui-bg) 30%);

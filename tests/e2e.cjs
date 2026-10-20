@@ -27,6 +27,10 @@ async function setupData(page) {
       entries: {
         0: { uid: 0, key: [], keysecondary: [], comment: '雨城常驻', content: '雨城一年有两百天在下雨，老城区的路灯是黄色的。<char>总说<USER>是唯一不嫌雨烦的人，{{char}}会去{{user}}家楼下等。', constant: true, selective: false, order: 100, position: 0, disable: false, probability: 100, useProbability: true },
         1: { uid: 1, key: ['便利店'], keysecondary: [], comment: '便利店', content: '街角的便利店叫「晴天」，店员阿哲总在打瞌睡。', constant: false, selective: false, order: 100, position: 0, disable: false, probability: 100, useProbability: true },
+        // 数据库插件那样的 @深度 条目
+        2: { uid: 2, key: [], keysecondary: [], comment: 'TavernDB-ACU-CustomExport-纪要-1', content: '【深度纪要】上周两人在天台看过一次流星。', constant: true, selective: false, order: 10000, position: 4, depth: 1, role: 0, disable: false, probability: 100, useProbability: true },
+        // 很长的常驻条目：世界书预算要按对话补全的上下文算，按文本补全的小上下文算会把所有条目都挤掉
+        3: { uid: 3, key: [], keysecondary: [], comment: '长设定', content: '【长设定开头】' + '雨城的老城区有很多窄巷，巷口有卖糖水的小摊。'.repeat(220), constant: true, selective: false, order: 200, position: 1, disable: false, probability: 100, useProbability: true },
       },
     };
     await fetch('/api/worldinfo/edit', { method: 'POST', headers: h, body: JSON.stringify({ name: '雨城', data: world }) });
@@ -37,7 +41,7 @@ async function setupData(page) {
     }
     const s = await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js');
     for (const k of [...s.LIBRARY, ...s.HEAVY]) s.state[k] = [];
-    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, enabled: false, auto: false, button: true } };
+    s.state.settings = { ...s.state.settings, seeded: true, api: 'st', currentComboId: 'c_store', theme: 'magazine', canvas: 'theme', tail: { ...s.state.settings.tail, enabled: false, auto: false, button: true, askExtra: false } };
     s.seedDefaults(false);
     await s.saveAll();
     c.saveSettingsDebounced();
@@ -120,6 +124,11 @@ async function desktop(browser) {
   ok(/<CharacterSheet>[\s\S]*林晚[\s\S]*多余的伞/.test(sys), '材料带角色卡');
   ok(sys.includes('两百天在下雨'), '材料带常驻世界书');
   ok(sys.includes('晴天'), '材料带关键词激活的世界书（聊天里提到便利店）');
+  ok(sys.includes('【长设定开头】'), '长的世界书条目也带上（不受酒馆世界书预算限制）');
+  const rc = (sys.match(/<RecentChat>([\s\S]*?)<\/RecentChat>/) || [])[1] || '';
+  const dAt = rc.indexOf('【深度纪要】上周两人在天台看过一次流星。');
+  const msgsAfter = dAt < 0 ? -1 : (rc.slice(dAt).match(/\n[^\n：]{1,20}：/g) || []).length;
+  ok(dAt > 0 && msgsAfter === 1, `@深度 1 的条目插在最后一条消息前面（后面有 ${msgsAfter} 条消息）`);
   ok(sys.includes('夜班护士'), '材料带用户人设');
   ok(sys.includes('<RecentChat>') && sys.includes('躲雨'), '材料带最近聊天');
   ok(call1.messages[2].content.startsWith('<Brief>') && call1.messages[2].content.includes('深夜便利店'), 'Brief 带提示词');
@@ -183,6 +192,16 @@ async function desktop(browser) {
   ok(reqTxt.includes('第一步') && reqTxt.includes('第二步') && reqTxt.includes('<Brief>') && reqTxt.includes('<CharacterSheet>'), '「ⓘ」里能看到每一步发给模型的内容');
   await page.click('.xjc-sheet .xjc-x');
 
+  // 3b. 附加要求：平时收着，点开填了才带上
+  ok(await page.locator('.xjc-extra textarea').isHidden() && await page.locator('.xjc-extra-open').isVisible(), '附加要求默认收起');
+  await page.click('.xjc-extra-open');
+  await page.fill('.xjc-extra textarea', '这次让TA吃醋测试');
+  await page.click('.xjc-actions .pri');
+  await waitResult(page);
+  ok(JSON.stringify(lastCall().messages).includes('这次让TA吃醋测试'), '附加要求发给了模型');
+  await page.click('.xjc-extra-box .xjc-btn:has-text("不用了")');
+  ok(await page.locator('.xjc-extra textarea').isHidden() && (await page.inputValue('.xjc-extra textarea')) === '', '「不用了」清空并收起');
+
   // 4. 自配 API：拉模型、测试、设为默认、流式
   await page.click('.xjc-tabs button[data-v="settings"]');
   await page.click('.xjc-view[data-view="settings"] .xjc-seg >> text=API');
@@ -238,6 +257,7 @@ async function desktop(browser) {
   await page.click('.xjc-tabs button[data-v="settings"]');
   await page.click('.xjc-view[data-view=settings] .xjc-seg button:has-text("聊天内")');
   await page.click('.xjc-toggle:has-text("在楼层里显示小剧场")');
+  await page.click('.xjc-toggle:has-text("先填这次的附加要求")');
   await page.click('.xjc-tabs button[data-v="stage"]');
   await page.click('.xjc-ops >> text=挂到聊天');
   await sleep(800);
@@ -249,8 +269,12 @@ async function desktop(browser) {
   await lastMes.hover();
   await lastMes.locator('.extraMesButtonsHint').click();
   await lastMes.locator('.xjc-mes-btn').click();
+  const pop = page.locator('.popup:visible .popup-input').last();
+  await pop.fill('楼层附加要求测试');
+  await page.locator('.popup:visible .popup-button-ok').last().click();
   await page.waitForFunction(() => document.querySelectorAll('#chat .mes .xjc-tail-card').length >= 2 && !document.querySelector('.xjc-tail-busy'), null, { timeout: 30000 });
   ok(true, '消息按钮出了一篇');
+  ok(JSON.stringify(lastCall().messages).includes('楼层附加要求测试'), '面具按钮先问附加要求，填的内容发给了模型');
   await page.screenshot({ path: `${SHOTS}/d-07-chat-tail.png` });
 
   // 7b. 换主题：面板、聊天卡片、iframe 正文一起换，不用重开
@@ -276,7 +300,7 @@ async function desktop(browser) {
     st.id = 'fake-st-theme';
     st.textContent = 'body input, body textarea, body select { background-color: rgb(100, 100, 100) !important; color: rgb(1, 1, 1) !important; }';
     document.head.appendChild(st);
-    const i = document.querySelector('.xjc-root input[type=text]');
+    const i = document.querySelector('.xjc-root input[type=text], .xjc-root textarea');
     const cs = getComputedStyle(i);
     const r = [cs.backgroundColor, cs.color];
     st.remove();
@@ -517,7 +541,9 @@ async function mobile(browser) {
   await page.evaluate(() => document.querySelector('#chat .mes .xjc-tail-card')?.scrollIntoView());
   await sleep(500);
   await page.screenshot({ path: `${SHOTS}/m-08-chat-tail.png` });
-  const inputFont = await page.evaluate(() => { window.XiaoJuChang.open('stage'); return [getComputedStyle(document.querySelector('.xjc-extra input')).fontSize, document.querySelector('meta[name=viewport]')?.content || '']; });
+  await page.evaluate(() => window.XiaoJuChang.open('stage'));
+  await page.tap('.xjc-extra-open');
+  const inputFont = await page.evaluate(() => { return [getComputedStyle(document.querySelector('.xjc-extra textarea')).fontSize, document.querySelector('meta[name=viewport]')?.content || '']; });
   ok(inputFont[0] === '14px' && /maximum-scale=1/.test(inputFont[1]), `手机输入框和正文一样大（${inputFont[0]}），viewport 禁止缩放所以 iOS 不会放大`);
   ok(errors.length === 0, `手机端没有页面错误${errors.length ? '：' + errors.join(' | ') : ''}`);
   await ctx.close();

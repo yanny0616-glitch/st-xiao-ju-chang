@@ -64,7 +64,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   lengthLimit: true, defaultLength: "medium", defaultStyle: "free", stagedDefault: false, streamPreview: true,
   randomIncludesAi: true, recentKeep: 10, currentComboId: "c_store", defaultPreambleId: "pre_strict",
   api: "st", maxTokens: 4096,
-  tail: { enabled: false, button: true, auto: false, chance: 30, pick: "random", comboId: "", expanded: true },
+  tail: { enabled: false, button: true, askExtra: false, auto: false, chance: 30, pick: "random", comboId: "", expanded: true },
   seeded: false,
 });
 const LENGTH_CHARS = { short: 400, medium: 900, long: 1800 };

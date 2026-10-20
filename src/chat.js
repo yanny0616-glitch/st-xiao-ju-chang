@@ -194,6 +194,18 @@ export function renderAll() {
   });
 }
 
+/** 问这次的附加要求：返回填的内容（可为空串），取消返回 null */
+async function askExtra() {
+  const c = ctx();
+  const msg = '这次附加要求（可留空）';
+  if (c.callGenericPopup && c.POPUP_TYPE?.INPUT != null) {
+    const v = await c.callGenericPopup(msg, c.POPUP_TYPE.INPUT, '', { rows: 3, okButton: '出一篇', cancelButton: '取消' });
+    return typeof v === 'string' ? v.trim() : null;
+  }
+  const v = window.prompt(msg, '');
+  return v === null ? null : v.trim();
+}
+
 // ── 接线 ──
 function syncButton() {
   const t = state.settings.tail;
@@ -221,7 +233,9 @@ export function initChat() {
     const b = e.target.closest?.('.xjc-mes-btn');
     if (!b) return;
     const id = Number(b.closest('.mes')?.getAttribute('mesid'));
-    if (Number.isFinite(id)) generateFor(id);
+    if (!Number.isFinite(id)) return;
+    if (!state.settings.tail.askExtra) { generateFor(id); return; }
+    askExtra().then(extra => { if (extra !== null) generateFor(id, { extra }); });
   });
   const later = fn => (...args) => setTimeout(() => fn(...args), 0);
   c.eventSource.on(ev.CHAT_CHANGED, later(renderAll));

@@ -60,6 +60,22 @@ export async function recentChat(rounds, uptoIndex) {
 }
 
 /** 拼一段 system 材料。opts: { context, who, uptoIndex } */
+/**
+ * 世界书不设预算：只要激活了（蓝灯常驻、绿灯被聊天触发）就全带上，不管酒馆世界书设置里的百分比和预算上限。
+ * 做法是只在这次扫描里给条目标上「不计预算」——条目是酒馆每次扫描新拷的，不影响酒馆自己的数据和正常聊天
+ */
+async function scanWorldInfo(scan, scanData) {
+  const c = ctx();
+  const ev = c.eventTypes?.WORLDINFO_ENTRIES_LOADED;
+  const onLoaded = lores => { for (const list of Object.values(lores || {})) if (Array.isArray(list)) for (const e of list) if (e) e.ignoreBudget = true; };
+  if (ev) c.eventSource.on(ev, onLoaded);
+  try {
+    return await c.getWorldInfoPrompt(scan, 10_000_000, true, scanData);
+  } finally {
+    if (ev) c.eventSource.removeListener?.(ev, onLoaded);
+  }
+}
+
 export async function buildMaterials({ context = {}, who = 'persona', uptoIndex }) {
   const c = ctx();
   const cur = currentChar();
@@ -85,14 +101,28 @@ export async function buildMaterials({ context = {}, who = 'persona', uptoIndex 
   const want = Math.max(1, Math.min(100, Number(context.rounds) || 12)) * 2;
   const history = context.chat === 'recent' ? all.slice(-want) : [];
 
+  // @深度 的世界书条目（数据库插件的记忆默认就在 @深度 2）：和酒馆一样按深度插进聊天记录，0 = 最后一条之后
+  const atDepth = [];
   if (context.worldInfo !== false && typeof c.getWorldInfoPrompt === 'function') {
     try {
       // 和酒馆自己生成时一样：截到这一楼、正则处理过的聊天，「新的在前」交给酒馆扫描，
-      // 扫描深度、绿灯关键词、蓝灯常驻都按酒馆的世界书设置（数据库插件的召回编码也就照常生效）；dry run 不触发激活事件
+      // 扫描深度、绿灯关键词、蓝灯常驻按酒馆的世界书设置，不设预算（数据库插件的召回编码也就照常生效）；dry run 不触发激活事件
       const scan = all.map(m => `${m.name}: ${m.text}`).reverse();
-      const wi = await c.getWorldInfoPrompt(scan, c.maxContext || 8192, true);
-      const text = [wi?.worldInfoBefore, wi?.worldInfoAfter].filter(s => s && s.trim()).join('\n');
-      if (text) parts.push(`<WorldInfo>\n${sub(text.trim(), name)}\n</WorldInfo>`);
+      const scanData = {
+        personaDescription: c.powerUserSettings?.persona_description || '', characterDescription: ch.description || '',
+        characterPersonality: ch.personality || '', characterDepthPrompt: depth || '', scenario: ch.scenario || '',
+        creatorNotes: ch.data?.creator_notes || ch.creatorcomment || '', trigger: 'normal',
+      };
+      const wi = await scanWorldInfo(scan, scanData);
+      const ex = (wi?.worldInfoExamples || []).map(e => e?.content);
+      const text = [wi?.worldInfoBefore, wi?.worldInfoAfter, ...(wi?.anBefore || []), ...(wi?.anAfter || []), ...ex].filter(s => s && String(s).trim()).join('\n');
+      for (const d of wi?.worldInfoDepth || []) {
+        const body = (d?.entries || []).filter(s => s && String(s).trim()).join('\n');
+        if (body) atDepth.push({ depth: Math.max(0, Number(d.depth) || 0), text: sub(body.trim(), name) });
+      }
+      const loose = history.length ? '' : atDepth.map(d => d.text).join('\n');
+      const all2 = [text && sub(text.trim(), name), loose].filter(Boolean).join('\n');
+      if (all2) parts.push(`<WorldInfo>\n${all2}\n</WorldInfo>`);
     } catch (e) { console.warn('[小剧场] 世界书读取失败', e); }
   }
 
@@ -102,7 +132,10 @@ export async function buildMaterials({ context = {}, who = 'persona', uptoIndex 
   }
 
   if (history.length) {
-    parts.push('<RecentChat>\n' + history.map(m => `${m.name}：${m.text}`).join('\n') + '\n</RecentChat>');
+    const lines = history.map(m => `${m.name}：${m.text}`);
+    // 从深往浅插，同一深度按酒馆给的顺序
+    for (const d of [...atDepth].sort((x, y) => y.depth - x.depth)) lines.splice(Math.max(0, lines.length - d.depth), 0, d.text);
+    parts.push('<RecentChat>\n' + lines.join('\n') + '\n</RecentChat>');
   }
   return { text: parts.join('\n\n'), charName: name, historyCount: history.length };
 }

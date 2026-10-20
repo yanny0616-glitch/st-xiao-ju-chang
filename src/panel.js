@@ -117,10 +117,18 @@ function buildStage() {
   const v = views.stage;
   for (const k of ['notice', 'pick', 'extra', 'actions', 'result', 'recent']) stageBox[k] = el('div', `xjc-stage-${k}`);
   stageBox.actions.className = 'xjc-actions';
-  const extra = input('', '加一句这次的要求（可空），比如：下雨天、写得甜一点');
+  // 附加要求：平时收着，点开才填；填的内容跟着这几次生成，「不用了」清空收起
+  const extra = textarea('', 3, '这次额外想写的，比如：下雨天、写得甜一点、让 TA 吃醋');
   stageBox.extraInput = extra;
   stageBox.extra.className = 'xjc-extra';
-  stageBox.extra.appendChild(extra);
+  const open = btn('＋ 这次附加要求', () => setExtra(true), 'xjc-btn sm ghost xjc-extra-open');
+  const box = el('div', 'xjc-extra-box');
+  const hd = el('div', 'xjc-extra-hd');
+  hd.append(el('span', 'lb', '这次附加要求'), btn('不用了', () => { extra.value = ''; setExtra(false); }, 'xjc-btn sm ghost'));
+  box.append(hd, extra);
+  const setExtra = on => { open.hidden = on; box.hidden = !on; if (on) extra.focus(); };
+  stageBox.extra.append(open, box);
+  box.hidden = true;
   stageBox.genBtn = btn('生成一篇', () => {
     const c = currentCombo();
     if (!c) { toast('先在「库」里建一个小剧场'); switchTab('library'); return; }
@@ -1124,7 +1132,10 @@ function setChat(box) {
   box.appendChild(more);
   more.hidden = !t.enabled;
   box = more;
-  box.appendChild(toggle('消息的「…」菜单里加面具按钮（点一下为这条出一篇）', t.button, v => { put({ button: v }); document.dispatchEvent(new CustomEvent('xjc-settings')); }));
+  const askT = toggle('点面具按钮时先填这次的附加要求（可留空，直接确定就照常出）', t.askExtra, v => put({ askExtra: v }));
+  box.appendChild(toggle('消息的「…」菜单里加面具按钮（点一下为这条出一篇）', t.button, v => { put({ button: v }); document.dispatchEvent(new CustomEvent('xjc-settings')); askT.hidden = !v; }));
+  box.appendChild(askT);
+  askT.hidden = !t.button;
   // 自动出关着时，概率和出哪种都用不到，收起来
   const autoBox = el('div');
   box.appendChild(toggle('AI 回复后自动出一篇', t.auto, v => { put({ auto: v }); autoBox.hidden = !v; }));
