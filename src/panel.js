@@ -168,7 +168,8 @@ function tempCombo() {
   return {
     ...newCombo(), id: '', temp: true, name: ps.length === 1 ? ps[0].title : `${ps[0].title} 等 ${ps.length} 条`,
     preambleId: byId(state.preambles, state.settings.stagePreambleId) ? state.settings.stagePreambleId : newCombo().preambleId,
-    parts: [{ ...newPart(ps.map(p => `p:${p.id}`)), id: 'pt_temp' }], output: { ...newCombo().output, mode: 'mixed' },
+    parts: [{ ...newPart(ps.map(p => `p:${p.id}`)), id: 'pt_temp' }],
+    output: { ...newCombo().output, mode: ['text', 'html', 'mixed'].includes(state.settings.stageOutMode) ? state.settings.stageOutMode : 'mixed' },
   };
 }
 function currentCombo() {
@@ -309,11 +310,14 @@ function pickCombo() {
     search.style.marginTop = '10px';
     search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
     body.appendChild(search);
-    const hint = el('p', 'xjc-hint', '点选一条或几条，按顺序拼在一起生成；前置要求在下面选，其他都跟随全局。觉得好用可以在舞台上「存成小剧场」。');
+    const hint = el('p', 'xjc-hint', '点选一条或几条，按顺序拼在一起生成；前置要求和形式在下面选，其他都跟随全局。觉得好用可以在舞台上「存成小剧场」。');
     body.appendChild(hint);
     const preSel = select(state.preambles.map(p => ({ v: p.id, l: p.name })), byId(state.preambles, state.settings.stagePreambleId) ? state.settings.stagePreambleId : (state.settings.defaultPreambleId || state.preambles[0]?.id || ''));
     const preF = field('前置要求', preSel);
     body.appendChild(preF);
+    let outMode = ['text', 'html', 'mixed'].includes(state.settings.stageOutMode) ? state.settings.stageOutMode : 'mixed';
+    const outF = field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], outMode, v => { outMode = v; }));
+    body.appendChild(outF);
     const chips = el('div', 'xjc-chips');
     chips.style.margin = '10px 0 4px';
     body.appendChild(chips);
@@ -322,7 +326,7 @@ function pickCombo() {
     body.appendChild(list);
     const useBtn = btn('用选中的提示词', () => {
       if (!picked.size) { toast('先点选至少一条提示词'); return; }
-      setSetting({ currentComboId: TEMP, stagePromptIds: [...picked], stagePreambleId: preSel.value }); closeIt(); renderPick();
+      setSetting({ currentComboId: TEMP, stagePromptIds: [...picked], stagePreambleId: preSel.value, stageOutMode: outMode }); closeIt(); renderPick();
     }, 'xjc-btn pri');
     const newBtn = btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn');
     foot.append(newBtn, useBtn);
@@ -330,7 +334,7 @@ function pickCombo() {
     const build = () => {
       tags = allTags(mode === 'combos' ? state.combos : state.prompts);
       chips.hidden = !tags.length;
-      hint.hidden = preF.hidden = mode !== 'prompts';
+      hint.hidden = preF.hidden = outF.hidden = mode !== 'prompts';
       search.hidden = (mode === 'combos' ? state.combos : state.prompts).length <= 6;
       newBtn.hidden = mode !== 'combos';
       useBtn.hidden = mode !== 'prompts';
@@ -1444,6 +1448,7 @@ function wiSourceBox() {
   const w = el('div');
   const pickBox = el('div');
   const listBox = el('div', 'xjc-wi-list');
+  const opened = new Set();
   const fill = async () => {
     const [names, def] = await Promise.all([worldNames(), tavernWorlds()]);
     const add = new Set(S().wiAdd || []), rm = new Set(S().wiRemove || []);
@@ -1451,9 +1456,12 @@ function wiSourceBox() {
     const all = [...new Set([...def.keys(), ...names, ...add])];
     if (!all.length) listBox.appendChild(el('div', 'xjc-empty', '酒馆里还没有世界书'));
     for (const n of all) {
-      const row = el('label', 'xjc-check');
+      const row = el('div', 'xjc-check xjc-wi-book');
+      const cbWrap = el('label', 'xjc-wi-cb');
       const cb = el('input');
       cb.type = 'checkbox';
+      cb.title = '用这本';
+      cbWrap.appendChild(cb);
       cb.checked = (def.has(n) || add.has(n)) && !rm.has(n);
       cb.onchange = () => {
         const a = new Set(S().wiAdd || []), r = new Set(S().wiRemove || []);
@@ -1461,14 +1469,17 @@ function wiSourceBox() {
         setSetting({ wiAdd: [...a], wiRemove: [...r] });
       };
       const why = def.get(n) || (names.includes(n) ? '' : '已经不在酒馆里了');
-      const mid = el('div', 'xjc-grow', n);
+      const mid = el('div', 'xjc-grow xjc-wi-name', n);
       if (why) mid.appendChild(el('span', 'xjc-wi-why', why));
       const sum = el('div', 'xjc-wi-sum');
       mid.appendChild(sum);
-      row.append(cb, mid);
+      row.append(cbWrap, mid);
       const entries = el('div', 'xjc-wi-entries');
+      // 默认收起，点书名展开条目；条目一行一条，直接显示酒馆里的状态（开 / 关、蓝灯 / 绿灯、位置），要改去酒馆的世界书里改
+      const setOpen = v => { entries.hidden = !v; row.classList.toggle('open', v); v ? opened.add(n) : opened.delete(n); };
+      mid.onclick = () => setOpen(entries.hidden);
+      setOpen(opened.has(n));
       listBox.append(row, entries);
-      // 条目直接列出来，只显示酒馆里的状态（开 / 关、蓝灯 / 绿灯），要改去酒馆的世界书里改
       if (names.includes(n)) loadBook(n).then(list => {
         const on = list.filter(e => !e.disable);
         const cnt = l => on.filter(e => lampOf(e) === l).length;
@@ -1538,8 +1549,11 @@ function setGen(box) {
   box.appendChild(field('聊天记录', seg([{ v: 'recent', l: '最近 N 轮' }, { v: 'none', l: '不带' }], S().defaultChat || 'recent', v => { setSetting({ defaultChat: v }); roundsF.hidden = v !== 'recent'; })));
   box.appendChild(roundsF);
   roundsF.hidden = (S().defaultChat || 'recent') !== 'recent';
-  box.appendChild(toggle('带世界书（和酒馆一样按聊天内容激活）', S().defaultWorldInfo !== false, v => setSetting({ defaultWorldInfo: v })));
-  box.appendChild(wiSourceBox());
+  // 不带世界书时，世界书来源用不上，收起来
+  const wiSrc = wiSourceBox();
+  wiSrc.hidden = S().defaultWorldInfo === false;
+  box.appendChild(toggle('带世界书（和酒馆一样按聊天内容激活）', S().defaultWorldInfo !== false, v => { setSetting({ defaultWorldInfo: v }); wiSrc.hidden = !v; }));
+  box.appendChild(wiSrc);
   box.appendChild(toggle('带剧情总结', S().defaultSummary !== false, v => setSetting({ defaultSummary: v })));
   const style = select(Object.entries(STYLE_LABEL).map(([v, l]) => ({ v, l })), globalStyle());
   style.onchange = () => setSetting({ defaultStyle: style.value });
