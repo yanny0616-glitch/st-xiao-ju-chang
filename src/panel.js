@@ -678,20 +678,94 @@ function allTags(list) { return [...new Set(list.flatMap(x => x.tags || []))]; }
  * 标签照旧用来筛选和「只抽 / 排除」。折叠状态记在 settings.groupFold
  */
 const UNGROUPED = '未分组';
+// 在列表里直接新建、还没放东西的空分组记在 settings.groupNames[kind]，免得一刷新就没了
+const createdGroups = kind => (S().groupNames?.[kind] || []).filter(Boolean);
+const setCreatedGroups = (kind, list) => setSetting({ groupNames: { ...(S().groupNames || {}), [kind]: [...new Set(list)] } });
 function groupsOf(kind) {
   const seen = [];
   for (const r of state[kind]) { const g = (r.group || '').trim(); if (g && !seen.includes(g)) seen.push(g); }
+  for (const g of createdGroups(kind)) if (!seen.includes(g)) seen.push(g);
   return seen;
 }
+/** 分组下拉：未分组 / 已有分组 / ＋ 新建分组（选了才出输入框）。返回节点，node.value 读选中的组名 */
 function groupInput(kind, value) {
-  const i = input(value || '', '比如：塔罗、日常场景（空 = 未分组）');
-  const id = `xjc-groups-${kind}`;
-  let dl = document.getElementById(id);
-  if (!dl) { dl = document.createElement('datalist'); dl.id = id; document.body.appendChild(dl); }
-  dl.innerHTML = '';
-  for (const g of groupsOf(kind)) { const o = document.createElement('option'); o.value = g; dl.appendChild(o); }
-  i.setAttribute('list', id);
-  return i;
+  const NEW = '\u0000new';
+  const w = el('div', 'xjc-grp-pick');
+  const groups = groupsOf(kind);
+  const cur = (value || '').trim();
+  if (cur && !groups.includes(cur)) groups.push(cur);
+  const sel = select([{ v: '', l: UNGROUPED }, ...groups.map(g => ({ v: g, l: g })), { v: NEW, l: '＋ 新建分组…' }], cur);
+  const name = input('', '新分组的名字，比如：塔罗');
+  name.hidden = true;
+  sel.onchange = () => { name.hidden = sel.value !== NEW; if (!name.hidden) name.focus(); };
+  w.append(sel, name);
+  Object.defineProperty(w, 'value', { get: () => (sel.value === NEW ? name.value.trim() : sel.value) });
+  return w;
+}
+/** 导入时的「放进分组」：导成提示词 / 随机条目时换成对应的分组下拉，node.setKind(kind) 切换 */
+function importGroupInput(kind) {
+  const w = el('div');
+  let inner = null;
+  w.setKind = k => { inner = groupInput(k === 'randoms' ? 'randoms' : 'prompts', ''); w.replaceChildren(inner); };
+  w.setKind(kind);
+  Object.defineProperty(w, 'value', { get: () => inner.value });
+  return w;
+}
+/** 标签：已有的标签点一下选上 / 取消，也可以打新的（回车加上）。返回节点，node.value 读空格分隔的标签 */
+function tagInput(tags, known) {
+  const w = el('div', 'xjc-tag-pick');
+  const chosen = [...(tags || [])];
+  const chips = el('div', 'xjc-chips');
+  const add = input('', '新标签，回车加上');
+  const paint = () => {
+    chips.innerHTML = '';
+    for (const t of [...new Set([...known, ...chosen])]) {
+      const c = el('button', `xjc-chip${chosen.includes(t) ? ' on' : ''}`, `#${t}`);
+      c.type = 'button';
+      c.onclick = () => { const i = chosen.indexOf(t); i < 0 ? chosen.push(t) : chosen.splice(i, 1); paint(); };
+      chips.appendChild(c);
+    }
+    chips.hidden = !chips.children.length;
+  };
+  const commit = () => { for (const t of textToTags(add.value)) if (!chosen.includes(t)) chosen.push(t); add.value = ''; paint(); };
+  add.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); commit(); } };
+  add.onblur = commit;
+  paint();
+  w.append(chips, add);
+  Object.defineProperty(w, 'value', { get: () => tagsToText([...chosen, ...textToTags(add.value)]) });
+  return w;
+}
+/** 往一个分组里放条目（新建分组时也用）：勾上的移进这个组 */
+function fillGroup(kind, g, onChange) {
+  const label = kind === 'prompts' ? '提示词' : '随机条目';
+  openSheet(g ? `往「${g}」里放${label}` : '新建分组', (body, foot, closeIt) => {
+    const name = g ? null : input('', '比如：塔罗、日常场景');
+    if (name) body.appendChild(field('分组名', name));
+    const chosen = new Set();
+    const list = el('div', 'xjc-list');
+    const rows = state[kind].filter(r => (r.group || '') !== g);
+    if (!rows.length) list.appendChild(el('div', 'xjc-empty', `没有别的${label}了`));
+    for (const r of rows) {
+      const row = el('label', 'xjc-check');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.onchange = () => (cb.checked ? chosen.add(r.id) : chosen.delete(r.id));
+      const mid = el('div', 'xjc-grow');
+      mid.append(el('div', '', r.title), el('div', 'd', `${(r.group || '').trim() || UNGROUPED}${(r.tags || []).length ? ' · ' + r.tags.map(t => '#' + t).join(' ') : ''}`));
+      row.append(cb, mid);
+      list.appendChild(row);
+    }
+    body.appendChild(field(`勾上要放进来的${label}`, list, g ? '' : '可以先不勾，建好以后在分组标题上点「＋」再放，或者编辑提示词时在「分组」里选。'));
+    foot.appendChild(btn(g ? '放进来' : '新建', async () => {
+      const n = g || name.value.trim().slice(0, 30);
+      if (!n) { toast('分组名不能空'); return; }
+      if (n === UNGROUPED) { toast(`「${UNGROUPED}」是保留的名字`); return; }
+      state[kind].forEach(r => { if (chosen.has(r.id)) r.group = n; });
+      if (!state[kind].some(r => r.group === n)) await setCreatedGroups(kind, [...createdGroups(kind), n]);
+      if (chosen.size) await save(kind);
+      closeIt(); onChange();
+    }, 'xjc-btn pri'));
+  });
 }
 /** 把 rows 按组画进 box；open 为 true 时（在搜索 / 筛标签）全部展开、空组不显示 */
 function groupedList(box, kind, rows, buildRow, { open = false, manage = true, onChange = () => {}, headExtra = null } = {}) {
@@ -705,7 +779,7 @@ function groupedList(box, kind, rows, buildRow, { open = false, manage = true, o
   const fold = S().groupFold || {};
   for (const g of [...groups, UNGROUPED]) {
     const inG = rows.filter(r => ((r.group || '').trim() || UNGROUPED) === g);
-    if (!inG.length && (open || g === UNGROUPED)) continue;
+    if (!inG.length && (open || !manage || g === UNGROUPED)) continue;
     const key = `${kind}:${g}`;
     const sec = el('div', 'xjc-grp');
     const hd = el('div', 'xjc-grp-hd');
@@ -714,12 +788,13 @@ function groupedList(box, kind, rows, buildRow, { open = false, manage = true, o
     hd.append(el('span', 'arw', closed ? '▸' : '▾'), el('b', '', g), el('span', 'n', String(inG.length)));
     if (headExtra) { const x = headExtra(g, inG); if (x) hd.appendChild(x); }
     if (manage && g !== UNGROUPED) {
+      hd.appendChild(ibtn('fa-plus', '往这个组里放条目', e => { e.stopPropagation(); fillGroup(kind, g, onChange); }, 'xjc-btn sm ghost'));
       hd.appendChild(ibtn('fa-pen', '改名', e => { e.stopPropagation(); renameGroup(kind, g, onChange); }));
       hd.appendChild(ibtn('fa-folder-minus', '解散分组', async e => {
         e.stopPropagation();
         if (!(await confirmSheet('解散分组', `「${g}」里的 ${state[kind].filter(r => r.group === g).length} 条移到「未分组」，条目本身不删。`, '解散'))) return;
         state[kind].forEach(r => { if (r.group === g) r.group = ''; });
-        await save(kind);
+        await Promise.all([save(kind), setCreatedGroups(kind, createdGroups(kind).filter(x => x !== g))]);
         onChange();
       }, 'xjc-btn sm ghost'));
     }
@@ -748,7 +823,7 @@ function renameGroup(kind, g, onChange) {
       state[kind].forEach(r => { if (r.group === g) r.group = n; });
       const fold = { ...(S().groupFold || {}) };
       if (`${kind}:${g}` in fold) { fold[`${kind}:${n}`] = fold[`${kind}:${g}`]; delete fold[`${kind}:${g}`]; }
-      await Promise.all([save(kind), setSetting({ groupFold: fold })]);
+      await Promise.all([save(kind), setSetting({ groupFold: fold }), createdGroups(kind).includes(g) ? setCreatedGroups(kind, createdGroups(kind).map(x => (x === g ? n : x))) : null]);
       closeIt(); onChange();
     }, 'xjc-btn pri'));
   });
@@ -761,6 +836,7 @@ function libEntries(box, kind) {
   const row = el('div', 'xjc-row');
   row.append(btn(`＋ 新增${label}`, () => editText(kind, null), 'xjc-btn pri'));
   if (kind === 'prompts') row.appendChild(btn('批量导入', importFlow, 'xjc-btn'));
+  row.appendChild(btn('＋ 新建分组', () => fillGroup(kind, '', renderLibrary), 'xjc-btn'));
   // 没分过组、但有标签的：一键按第一个标签分好
   const canAuto = state[kind].some(r => !(r.group || '').trim() && (r.tags || []).length);
   if (canAuto) row.appendChild(btn('按第一个标签分组', async () => {
@@ -878,13 +954,12 @@ function editText(kind, row) {
     body.appendChild(field('标题', t));
     let tg = null;
     if (!isPre) {
-      tg = input(tagsToText(row?.tags), '空格分隔，比如：场景 日常');
-      const known = allTags(state[kind]);
-      body.appendChild(field('标签', tg, known.length ? `已有：${known.join(' ')}` : ''));
+      tg = tagInput(row?.tags, allTags(state[kind]));
+      body.appendChild(field('标签', tg, '点已有的标签选上或取消，也可以打新的。'));
     }
-    // 分组可放可不放；点输入框会列出已有的分组
+    // 分组可放可不放：下拉里选已有的，或者新建一个
     const grp = isPre ? null : groupInput(kind, row?.group);
-    if (grp) body.appendChild(field('分组', grp, groupsOf(kind).length ? `已有：${groupsOf(kind).join('、')}` : '可以不填。填了库里就按组显示，编辑小剧场时也能整组选、从组里随机抽。'));
+    if (grp) body.appendChild(field('分组', grp, groupsOf(kind).length ? '' : '可以不放。放了库里就按组显示，编辑小剧场时也能整组选、从组里随机抽。'));
     const c = textarea(row?.content, isPre ? 12 : 8, isPre ? '整段 system 框架' : '可以用 {{user}} {{char}} {{篇幅}} {{随机词:世界}} 等宏');
     body.appendChild(field('内容', c));
     let def = null;
@@ -970,7 +1045,7 @@ function editCombo(row, draft = null) {
   openSheet(row ? `编辑「${row.name}」` : '新建小剧场', (body, foot, closeIt) => {
     const name = input(d.name, '比如：深夜便利店偶遇');
     body.appendChild(field('名字', name));
-    const tg = input(tagsToText(d.tags), '空格分隔');
+    const tg = tagInput(d.tags, allTags(state.combos));
     body.appendChild(field('标签', tg));
 
     body.appendChild(el('div', 'xjc-sec', '提示词'));
@@ -1270,9 +1345,9 @@ function importFlow() {
     body.appendChild(ta);
     let kind = 'prompts';
     const asCombo = toggle('每条同时建成一个小剧场（直接能在舞台上选）', false);
-    body.appendChild(field('文本导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; impGroupF.hidden = v === 'preambles'; })));
+    body.appendChild(field('文本导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; impGroupF.hidden = v === 'preambles'; impGroup.setKind(v); })));
     body.appendChild(asCombo);
-    const impGroup = input('', '可以不填');
+    const impGroup = importGroupInput(kind);
     const impGroupF = field('放进分组', impGroup);
     body.appendChild(impGroupF);
     const importRows = async rows => {
@@ -1315,9 +1390,9 @@ function pickLoose(found) {
     body.appendChild(el('p', 'xjc-hint', `没认出这个格式，把里面像提示词的 ${found.length} 段列出来了。勾上要的；点正文能展开看全文。`));
     const tagIn = input('', '空格分隔，可空');
     const tagF = field('统一加标签', tagIn);
-    const jGroup = input('', '可以不填');
+    const jGroup = importGroupInput(kind);
     const jGroupF = field('放进分组', jGroup);
-    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; tagF.hidden = jGroupF.hidden = v === 'preambles'; })));
+    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; tagF.hidden = jGroupF.hidden = v === 'preambles'; jGroup.setKind(v); })));
     body.append(tagF, jGroupF);
     if (found.length > 8) {
       const search = input('', '搜名字 / 内容');
