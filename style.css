@@ -78,6 +78,9 @@
 .xjc-sec { margin: 18px 0 8px; font-size: .78em; letter-spacing: .12em; opacity: .6; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
 .xjc-sec::after { content: ""; flex: 1; border-top: 1px solid var(--xjc-ui-line); }
 .xjc-sec:first-child { margin-top: 0; }
+.xjc-sec-fold { width: 100%; background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; font-size: .78em; cursor: pointer; text-align: left; }
+.xjc-sec-fold::before { content: "▸"; letter-spacing: 0; transition: transform .15s; }
+.xjc-sec-fold.open::before { transform: rotate(90deg); }
 .xjc-hint { font-size: .82em; opacity: .65; margin: 4px 0 0; line-height: 1.5; }
 .xjc-empty { text-align: center; opacity: .55; padding: 30px 10px; line-height: 1.7; }
 .xjc-chip {

@@ -388,13 +388,20 @@ function renderRecent() {
   const box = stageBox.recent;
   box.innerHTML = '';
   if (!state.recent.length) return;
-  box.appendChild(el('div', 'xjc-sec', `最近 · 保留 ${state.settings.recentKeep} 篇`));
   // 默认只看当前角色的；切到别的角色时不会满屏是别人的
   const mine = state.recent.filter(ofCurrentChar);
   const scope = S().recentScope === 'all' ? 'all' : 'char';
   const chips = scopeChips(state.recent.length, mine.length, scope, v => { setSetting({ recentScope: v }); renderRecent(); });
-  if (chips.children.length) { chips.style.marginBottom = '8px'; box.appendChild(chips); }
   const shown = scope === 'all' || !chips.children.length ? state.recent : mine;
+  // 默认折叠，点标题展开；展开 / 折叠记在设置里
+  const open = !!S().recentOpen;
+  const head = el('button', `xjc-sec xjc-sec-fold${open ? ' open' : ''}`, `最近 · ${shown.length} 篇 · 保留 ${state.settings.recentKeep} 篇`);
+  head.type = 'button';
+  head.setAttribute('aria-expanded', String(open));
+  head.onclick = () => { setSetting({ recentOpen: !open }); renderRecent(); };
+  box.appendChild(head);
+  if (!open) return;
+  if (chips.children.length) { chips.style.marginBottom = '8px'; box.appendChild(chips); }
   const list = el('div', 'xjc-list');
   if (!shown.length) list.appendChild(el('div', 'xjc-empty', `${currentChar()?.name || '这个角色'}还没有最近的小剧场。`));
   for (const r of shown) list.appendChild(resultItem(r, () => { showResult(r); stageBox.result.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));

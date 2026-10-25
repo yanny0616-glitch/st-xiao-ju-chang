@@ -60,7 +60,7 @@ const DEFAULT_COMBOS = [
 
 const DEFAULT_SETTINGS = Object.freeze({
   theme: "magazine", uiScale: 1, fontScale: 1, lineHeight: "mid", canvas: "theme", played: 0, motion: true,
-  defaultWho: "persona", defaultChat: "recent", defaultRounds: 12, defaultWorldInfo: true, wiSource: "sync", wiAdd: [], wiRemove: [], defaultSummary: true, writeBackDefault: false, writeBackFeature: false, foldStyle: "pill", foldCss: "", defaultChannel: "own",
+  defaultWho: "persona", defaultChat: "recent", defaultRounds: 12, defaultWorldInfo: true, recentOpen: false, wiSource: "sync", wiAdd: [], wiRemove: [], defaultSummary: true, writeBackDefault: false, writeBackFeature: false, foldStyle: "pill", foldCss: "", defaultChannel: "own",
   lengthLimit: true, defaultLength: "medium", defaultStyle: "free", stagedDefault: false, streamPreview: true, notifyDone: true,
   randomIncludesAi: true, recentKeep: 10, currentComboId: "c_store", defaultPreambleId: "pre_strict",
   api: "st", maxTokens: 4096,
