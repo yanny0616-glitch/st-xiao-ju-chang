@@ -4,7 +4,7 @@ import { ctx, el, uid, byId, toast, fail, copyText } from './util.js';
 import { state, save } from './store.js';
 import { generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, followAgain, resultPlainText, KIND_LABEL, kindOf } from './gen.js';
 import { mountFrame, markTheme } from './frame.js';
-import { openViewer } from './ui.js';
+import { openViewer, favIcon } from './ui.js';
 import { currentChar } from './host.js';
 import { instr } from './instr.js';
 import { currentFold } from './fold.js';
@@ -133,8 +133,8 @@ function tailCard(mesId, theater) {
   const heart = on => (on ? 'fa-solid fa-heart' : 'fa-regular fa-heart');
   tb('fa-solid fa-expand', '全屏', () => openViewer(theater, {
     actions: [
-      { label: isFavorite(theater) ? '♥' : '♡', title: '收藏', run: (r, b) => { b.textContent = toggleFavorite(r) ? '♥' : '♡'; return true; } },
-      { label: '复制', run: async r => { toast((await copyText(`${r.title}\n\n${resultPlainText(r)}`)) ? '已复制' : '复制失败'); return true; } },
+      { icon: 'fa-heart', title: '收藏', run: (r, b) => { favIcon(b, toggleFavorite(r)); return true; }, init: b => favIcon(b, isFavorite(theater)) },
+      { icon: 'fa-copy', title: '复制正文', run: async r => { toast((await copyText(`${r.title}\n\n${resultPlainText(r)}`)) ? '已复制' : '复制失败'); return true; } },
     ],
     onAction: text => generateFor(currentIndex(), { combo: theater.comboCopy, extra: continueExtra(theater, text) }),
   }));

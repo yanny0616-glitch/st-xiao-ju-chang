@@ -19,6 +19,12 @@ window.addEventListener('message', e => {
   if (d.type === 'resize' && Number.isFinite(d.height) && !entry.fill) {
     f.style.height = `${Math.max(60, Math.min(20000, Math.ceil(d.height)))}px`;
   }
+  // 长图：iframe 里画好的 PNG 传回来
+  if (d.type === 'snap' && entry.snaps?.has(d.req)) {
+    const p = entry.snaps.get(d.req);
+    entry.snaps.delete(d.req);
+    if (d.blob instanceof Blob && d.blob.size) p.resolve(d.blob); else p.reject(new Error(d.error || '长图没生成出来'));
+  }
   if (d.type === 'action' && entry.onAction) {
     const text = typeof d.text === 'string' ? d.text.trim().slice(0, 200) : '';
     if (text && f.offsetParent !== null) entry.onAction(text);
@@ -181,6 +187,21 @@ export function textToHtml(text) {
   return out.join('');
 }
 
+// 长图：酒馆这边碰不到沙盒 iframe 里的内容，所以把截图库（modern-screenshot，MIT，在 vendor/）送进 iframe，在里面画成 PNG 传回来。
+// 截图库默认开一个小框读浏览器的默认样式、好省掉和默认一样的样式；在沙盒里那个小框是另一个来源、读不到，会直接报错。
+// 这里给它一个空的替身：读不到默认样式时它就把样式全部原样写上，图片一样，只是慢一点
+// 画布按设备的上限收着：总像素不超过 1600 万、最长边不超过 16000，太长的就降一点清晰度，免得手机上画不出来
+let snapLib = null;
+const screenshotLib = () => (snapLib ||= fetch(new URL('../vendor/modern-screenshot.js', import.meta.url)).then(r => { if (!r.ok) throw new Error(`截图库加载失败（${r.status}）`); return r.text(); }).catch(e => { snapLib = null; throw e; }));
+const SNAP_SCRIPT = `window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==XJC_ID||d.type!=="snap")return;
+function done(m){var o={source:"xjc-frame",type:"snap",id:XJC_ID,req:d.req};for(var k in m)o[k]=m[k];parent.postMessage(o,"*")}
+try{if(!window.modernScreenshot){var sc=document.createElement("script");sc.textContent=d.lib;document.head.appendChild(sc)}
+var c=document.getElementById("xjc-content"),w=Math.ceil(Math.max(c.scrollWidth,c.getBoundingClientRect().width)),h=Math.ceil(Math.max(c.scrollHeight,c.getBoundingClientRect().height));
+var s=Math.max(.3,Math.min(2,Math.sqrt(16e6/(w*h)),16000/h,16000/w));
+var M=window.modernScreenshot;M.createContext(c,{scale:s,width:w,height:h,backgroundColor:getComputedStyle(document.body).backgroundColor,timeout:15000,type:"image/png"}).then(function(x){
+x.sandbox={contentWindow:null,remove:function(){}};
+return M.domToBlob(x).then(function(b){try{M.destroyContext(x)}catch(_){}return b})}).then(function(b){done({blob:b})},function(err){done({error:String(err&&err.message||err)})})}catch(err){done({error:String(err&&err.message||err)})}});`;
+
 function frameDoc(segments, id, fill) {
   const t = themeTokens();
   const body = segments.map(s => (s.type === 'html' ? `<div class="xjc-html">${s.content}</div>` : `<article class="xjc-text">${textToHtml(s.content)}</article>`)).join('\n');
@@ -222,13 +243,14 @@ html[data-motion=off] *{animation:none!important;transition:none!important}
 <${script}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
 if(window.ResizeObserver){new ResizeObserver(send).observe(content)}window.addEventListener("load",send);setInterval(send,700);send();
 window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));if(d.motion===false)r.setAttribute("data-motion","off");else r.removeAttribute("data-motion");var u=document.getElementById("xjc-user");if(u&&typeof d.css==="string")u.textContent=d.css;send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
+var XJC_ID=id;${SNAP_SCRIPT}
 document.addEventListener("click",function(e){var sp=e.target&&e.target.closest?e.target.closest(".xjc-spoiler"):null;if(sp){sp.classList.toggle("on");return}var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${script}>
 </body></html>`;
 }
 
 /**
  * 挂一个 iframe。opts: { fill: 是否铺满容器（全屏），onAction(text) }
- * 返回 handle：{ iframe, stream(segments, writing), fillSlots(map), destroy() }
+ * 返回 handle：{ iframe, stream(segments, writing), fillSlots(map), snapshot() → PNG Blob, destroy() }
  */
 export function mountFrame(container, segments, opts = {}) {
   for (const [k, v] of frames) if (!v.iframe.isConnected) frames.delete(k);
@@ -240,7 +262,7 @@ export function mountFrame(container, segments, opts = {}) {
   iframe.title = '小剧场';
   if (opts.fill) iframe.classList.add('fill');
   iframe.srcdoc = frameDoc(segments, id, !!opts.fill);
-  const entry = { iframe, onAction: opts.onAction, fill: !!opts.fill };
+  const entry = { iframe, onAction: opts.onAction, fill: !!opts.fill, snaps: new Map() };
   frames.set(id, entry);
   container.appendChild(iframe);
   const post = msg => { try { iframe.contentWindow?.postMessage({ source: 'xjc-parent', id, ...msg }, '*'); } catch { /* ignore */ } };
@@ -251,8 +273,24 @@ export function mountFrame(container, segments, opts = {}) {
     },
     fillSlots(map) { post({ type: 'fill', slots: map }); },
     setAction(fn) { entry.onAction = fn; },
+    async snapshot() {
+      const lib = await screenshotLib();
+      const req = ++seq;
+      return new Promise((resolve, reject) => {
+        entry.snaps.set(req, { resolve, reject });
+        post({ type: 'snap', lib, req });
+        setTimeout(() => { if (entry.snaps.delete(req)) reject(new Error('长图生成超时')); }, 60000);
+      });
+    },
     destroy() { frames.delete(id); iframe.remove(); },
   };
+}
+
+/** 导出成一个单独的 .html：和插件里看到的一样（主题、排版、交互都在），不依赖插件，任何浏览器都能打开 */
+export function standaloneHtml(segments, title) {
+  return frameDoc(segments, 'export', false)
+    .replace('<head>', `<head><title>${esc(title || '小剧场')}</title>`)
+    .replace('</style><style id="xjc-user">', '#xjc-content{max-width:860px;margin:0 auto;padding:24px 16px}\n</style><style id="xjc-user">');
 }
 
 /** 改了字号/行距/主题/画布：送进所有开着的 iframe，不重载，保留交互状态 */

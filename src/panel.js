@@ -13,7 +13,7 @@ import { resolveCombo, globalContext, globalWho, globalChannel, globalStyle, glo
 import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
-  closeTopSheet, confirmSheet, snapshotInfo, requestView, openViewer, closeViewer, viewerOpen,
+  closeTopSheet, confirmSheet, snapshotInfo, requestView, openViewer, closeViewer, viewerOpen, keepButtons, favIcon,
 } from './ui.js';
 import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks, addRows, combosFromPrompts, importDarkArchives, clearLibrary } from './data.js';
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
@@ -461,17 +461,15 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
     meta.append(el('span', '', `${result.characterName ? result.characterName + ' · ' : ''}${fmtTime(result.createdAt)}`), el('span', '', `${charCount(result)} 字 · ${result.comboCopy?.channel === 'preset' ? '走酒馆预设' : contextLabel(snap.context || result.comboCopy?.context)}${result.model ? ' · ' + result.model : ''}`));
     card.appendChild(meta);
     const ops = el('div', 'xjc-ops');
-    ops.appendChild(btn('再来一条', () => again(result), 'xjc-btn'));
+    ops.appendChild(ibtn('fa-rotate-right', '再来一条（同一套）', () => again(result), 'xjc-btn icon'));
     ops.appendChild(btn('接着写 / 追问', () => followSheet(result), 'xjc-btn xjc-follow-btn'));
-    const favBtn = btn(isFavorite(result) ? '♥ 已收藏' : '♡ 收藏', () => {
-      const on = toggleFavorite(result);
-      favBtn.textContent = on ? '♥ 已收藏' : '♡ 收藏';
-      renderRecent();
-    }, 'xjc-btn');
+    const favBtn = ibtn('fa-heart', '收藏', () => { favIcon(favBtn, toggleFavorite(result)); renderRecent(); }, 'xjc-btn icon');
+    favIcon(favBtn, isFavorite(result));
     ops.appendChild(favBtn);
     ops.appendChild(btn('挂到聊天', async () => {
       try { const at = await attachToLatest(result); toast(`已挂到第 ${at} 楼下面`, 'success'); } catch (e) { fail(e); }
     }, 'xjc-btn xjc-attach'));
+    ops.append(...keepButtons(() => frame, result, 'xjc-btn ghost icon'));
     ops.appendChild(ibtn('fa-copy', '复制正文', async () => toast((await copyText(`${result.title}\n\n${resultPlainText(result)}`)) ? '已复制正文' : '复制失败'), 'xjc-btn ghost icon'));
     ops.appendChild(ibtn('fa-circle-info', '这一篇用了什么', () => openSheet('这一篇用了什么', b => {
       b.appendChild(snapshotInfo(result));
@@ -503,9 +501,9 @@ function setStatus(text, { spin = true, onCancel, onRetry } = {}) {
 function viewResult(result) {
   openViewer(result, {
     actions: [
-      { label: '再来一条', run: r => { again(r); return false; } },
+      { icon: 'fa-rotate-right', title: '再来一条（同一套）', run: r => { again(r); return false; } },
       { label: '接着写 / 追问', run: r => { followSheet(r); return false; } },
-      { label: isFavorite(result) ? '♥' : '♡', title: '收藏', run: (r, b) => { b.textContent = toggleFavorite(r) ? '♥' : '♡'; renderRecent(); return true; } },
+      { icon: 'fa-heart', title: '收藏', run: (r, b) => { favIcon(b, toggleFavorite(r)); renderRecent(); return true; }, init: b => favIcon(b, isFavorite(result)) },
     ],
     onAction: text => continueFrom(result, text),
   });

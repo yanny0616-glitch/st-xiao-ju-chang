@@ -1,6 +1,6 @@
 // 表单控件、面板内抽屉、确认框、全屏查看器
-import { el, btn, esc, fmtTime, copyText, toast } from './util.js';
-import { mountFrame, markTheme } from './frame.js';
+import { el, btn, ibtn, esc, fmtTime, copyText, toast, saveFile } from './util.js';
+import { mountFrame, markTheme, standaloneHtml } from './frame.js';
 import { segmentsOf, contextLabel, KIND_LABEL, kindOf, charCount } from './gen.js';
 import { targetLabel } from './host.js';
 
@@ -176,6 +176,31 @@ export function requestView(result) {
 
 // ── 全屏查看器（面板和聊天共用） ──
 let viewer = null;
+const fileBase = r => `小剧场-${String(r.title || '无题').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)}-${new Date(r.createdAt || Date.now()).toISOString().slice(0, 10)}`;
+let snapping = false;
+/** 保存长图：整篇画成一张 PNG（HTML 小剧场按当前交互状态截） */
+export async function saveLongImage(frame, result) {
+  if (snapping) return;
+  snapping = true;
+  toast('正在生成长图…');
+  try { await saveFile(await frame.snapshot(), `${fileBase(result)}.png`, 'image/png'); } catch (e) { console.warn('[小剧场] 长图失败', e); toast(`长图没生成出来：${e.message || e}`); } finally { snapping = false; }
+}
+/** 导出小剧场：存成一个单独的 .html，打开就能看、能点 */
+export const exportTheater = result => saveFile(standaloneHtml(segmentsOf(result), result.title), `${fileBase(result)}.html`, 'text/html');
+/** 结果上常用的两个图标按钮：保存长图、导出 HTML */
+export const keepButtons = (getFrame, result, cls) => [
+  ibtn('fa-image', '保存长图', () => saveLongImage(getFrame(), result), cls),
+  ibtn('fa-file-code', '导出小剧场（.html）', () => exportTheater(result), cls),
+];
+
+/** 收藏按钮的图标：实心 = 已收藏，空心 = 没收藏 */
+export function favIcon(b, on) {
+  b.innerHTML = `<i class="${on ? 'fa-solid' : 'fa-regular'} fa-heart"></i>`;
+  b.title = on ? '取消收藏' : '收藏';
+  b.setAttribute('aria-label', b.title);
+}
+
+/** actions: [{ label | icon, title, run(result, button) → true 留在全屏, init(button) }] */
 export function openViewer(result, { actions = [], onAction } = {}) {
   closeViewer();
   const root = el('div', 'xjc-viewer');
@@ -190,15 +215,19 @@ export function openViewer(result, { actions = [], onAction } = {}) {
   info.appendChild(el('div', 'xjc-sec', '发给模型的内容'));
   info.appendChild(requestView(result));
   bar.appendChild(btn('ⓘ', () => { info.hidden = !info.hidden; }, 'xjc-btn ghost sm'));
+  let frame = null;
   for (const a of actions) {
-    const b = btn(a.label, async () => { const keep = await a.run(result, b); if (!keep) closeViewer(); }, 'xjc-btn sm');
+    const go = async () => { const keep = await a.run(result, b); if (!keep) closeViewer(); };
+    const b = a.icon ? ibtn(a.icon, a.title || '', go, 'xjc-btn sm ghost icon') : btn(a.label, go, 'xjc-btn sm');
     if (a.title) b.title = a.title;
+    a.init?.(b);
     bar.appendChild(b);
   }
+  bar.append(...keepButtons(() => frame, result, 'xjc-btn sm ghost icon'));
   const body = el('div', 'xjc-viewer-body');
   root.append(bar, body, info, el('div', 'xjc-viewer-foot'));
   document.body.appendChild(root);
-  mountFrame(body, segmentsOf(result), { fill: true, onAction: onAction ? text => { closeViewer(); onAction(text); } : null });
+  frame = mountFrame(body, segmentsOf(result), { fill: true, onAction: onAction ? text => { closeViewer(); onAction(text); } : null });
   const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); closeViewer(); } };
   document.addEventListener('keydown', onKey, true);
   viewer = { root, onKey };
