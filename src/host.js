@@ -64,10 +64,80 @@ export async function recentChat(rounds, uptoIndex) {
  * 世界书不设预算：只要激活了（蓝灯常驻、绿灯被聊天触发）就全带上，不管酒馆世界书设置里的百分比和预算上限。
  * 做法是只在这次扫描里给条目标上「不计预算」——条目是酒馆每次扫描新拷的，不影响酒馆自己的数据和正常聊天
  */
+/** 酒馆里所有世界书的名字（设置里选世界书用） */
+export async function worldNames() {
+  try { const wi = await import('/scripts/world-info.js'); return [...(wi.world_names || [])].sort((x, y) => x.localeCompare(y, 'zh')); } catch { return []; }
+}
+
+/** 酒馆这会儿会用到的世界书：全局开着的、当前角色卡绑定的（含附加的）、聊天绑定的、人设绑定的。返回 Map 名字 → 来源 */
+export async function tavernWorlds() {
+  const c = ctx();
+  const out = new Map();
+  const add = (n, why) => { if (n && !out.has(n)) out.set(n, why); };
+  try {
+    const wi = await import('/scripts/world-info.js');
+    for (const n of wi.selected_world_info || []) add(n, '酒馆已开启');
+    const cur = currentChar();
+    const ch = cur ? c.characters[cur.chid] : null;
+    if (ch) {
+      add(ch.data?.extensions?.world, '角色卡绑定');
+      const file = String(ch.avatar || '').replace(/\.[^.]+$/, '');
+      for (const n of wi.world_info?.charLore?.find(e => e.name === file)?.extraBooks || []) add(n, '角色卡绑定');
+    }
+    add(c.chatMetadata?.[wi.METADATA_KEY || 'world_info'], '聊天绑定');
+    add(c.powerUserSettings?.persona_description_lorebook, '人设绑定');
+  } catch (e) { console.warn('[小剧场] 读不到酒馆的世界书设置', e); }
+  return out;
+}
+
+/** 条目的灯：蓝灯常驻 / 绿灯按关键词 / 向量化（设置里显示状态用） */
+export const lampOf = e => (e?.constant ? 'constant' : e?.vectorized ? 'vectorized' : 'normal');
+/** 一本世界书的条目，按酒馆里的显示顺序 */
+export async function loadBook(name) {
+  const data = await ctx().loadWorldInfo(name);
+  return Object.values(data?.entries || {}).filter(Boolean).sort((a, b) => (a.displayIndex ?? a.uid) - (b.displayIndex ?? b.uid));
+}
+
+/** 选中的几本世界书，按酒馆自己的格式拷一份条目 */
+async function loreOf(books) {
+  const c = ctx();
+  const out = [];
+  for (const name of books) {
+    try {
+      const data = await c.loadWorldInfo(name);
+      for (const e of Object.values(data?.entries || {})) if (e) out.push({ ...e, world: name });
+    } catch (e) { console.warn(`[小剧场] 读不到世界书「${name}」`, e); }
+  }
+  return out;
+}
+
+/**
+ * 世界书来源（设置里二选一）：
+ * - 同步酒馆：和酒馆聊天时用的一样
+ * - 自己选：默认就是酒馆这会儿开着的 + 角色卡 / 聊天 / 人设绑定的，在这个基础上多勾（wiAdd）或取消（wiRemove）。
+ *   只记增减，换了角色，新角色卡绑定的书照样默认带上
+ * 两种都照酒馆的扫描规则激活，只在这次扫描里换掉条目列表，不改酒馆的世界书设置
+ */
 async function scanWorldInfo(scan, scanData) {
   const c = ctx();
+  const s = state.settings || {};
+  const pick = s.wiSource === 'pick';
+  const removed = new Set(pick ? s.wiRemove || [] : []);
+  const extra = pick ? await loreOf((s.wiAdd || []).filter(n => n && !removed.has(n))) : [];
   const ev = c.eventTypes?.WORLDINFO_ENTRIES_LOADED;
-  const onLoaded = lores => { for (const list of Object.values(lores || {})) if (Array.isArray(list)) for (const e of list) if (e) e.ignoreBudget = true; };
+  if (pick && !ev) throw new Error('这个版本的酒馆不支持自己选世界书');
+  const onLoaded = lores => {
+    if (pick && lores) {
+      const lists = ['globalLore', 'characterLore', 'chatLore', 'personaLore'].filter(k => Array.isArray(lores[k]));
+      const have = new Set();
+      for (const k of lists) {
+        lores[k].splice(0, lores[k].length, ...lores[k].filter(e => !removed.has(e?.world)));
+        for (const e of lores[k]) have.add(e?.world);
+      }
+      if (Array.isArray(lores.globalLore)) lores.globalLore.push(...extra.filter(e => !have.has(e.world)));
+    }
+    for (const list of Object.values(lores || {})) if (Array.isArray(list)) for (const e of list) if (e) e.ignoreBudget = true;
+  };
   if (ev) c.eventSource.on(ev, onLoaded);
   try {
     return await c.getWorldInfoPrompt(scan, 10_000_000, true, scanData);

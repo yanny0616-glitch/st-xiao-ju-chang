@@ -2,7 +2,7 @@
 import { ctx, el, btn, ibtn, esc, uid, clone, byId, toast, fail, fmtTime, copyText, saveFile, pickFile } from './util.js';
 import { state, save, setSetting, upsert, remove, seedDefaults, saveAll, backendName } from './store.js';
 import { DEFAULT_SETTINGS, LENGTH_LABEL } from './defaults.js';
-import { currentChar, apiTargets, targetLabel, resolveTarget, API_FORMATS, fetchModels, callModel } from './host.js';
+import { currentChar, apiTargets, targetLabel, resolveTarget, API_FORMATS, fetchModels, callModel, worldNames, tavernWorlds, loadBook, lampOf } from './host.js';
 import {
   generateTheater, weightedRandomCombo, aiPickCombo, continueExtra, segmentsOf, kindOf, KIND_LABEL, charCount, randomCandidates, comboParts, followAgain,
   resultPlainText, contextLabel, postProcess,
@@ -1428,6 +1428,68 @@ function renderFav() {
 
 // ── 设置 ──
 const SET_TABS = [{ v: 'gen', l: '生成' }, { v: 'api', l: 'API' }, { v: 'chat', l: '聊天内' }, { v: 'look', l: '外观' }, { v: 'data', l: '数据' }];
+/** 条目插在哪（和酒馆世界书里的「位置」一样） */
+const WI_POS = ['角色定义前', '角色定义后', '作者注释前', '作者注释后', '@深度', '示例消息前', '示例消息后', '出口'];
+const wiPos = e => (Number(e.position) === 4 ? `@深度 ${e.depth ?? 4}` : WI_POS[Number(e.position) || 0] || '');
+
+/** 世界书来源：同步酒馆，或者自己选（默认勾上酒馆开着的和角色卡等绑定的，在这上面增减） */
+function wiSourceBox() {
+  const w = el('div');
+  const pickBox = el('div');
+  const listBox = el('div', 'xjc-wi-list');
+  const fill = async () => {
+    const [names, def] = await Promise.all([worldNames(), tavernWorlds()]);
+    const add = new Set(S().wiAdd || []), rm = new Set(S().wiRemove || []);
+    listBox.innerHTML = '';
+    const all = [...new Set([...def.keys(), ...names, ...add])];
+    if (!all.length) listBox.appendChild(el('div', 'xjc-empty', '酒馆里还没有世界书'));
+    for (const n of all) {
+      const row = el('label', 'xjc-check');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = (def.has(n) || add.has(n)) && !rm.has(n);
+      cb.onchange = () => {
+        const a = new Set(S().wiAdd || []), r = new Set(S().wiRemove || []);
+        if (cb.checked) { r.delete(n); if (!def.has(n)) a.add(n); } else { a.delete(n); if (def.has(n)) r.add(n); }
+        setSetting({ wiAdd: [...a], wiRemove: [...r] });
+      };
+      const why = def.get(n) || (names.includes(n) ? '' : '已经不在酒馆里了');
+      const mid = el('div', 'xjc-grow', n);
+      if (why) mid.appendChild(el('span', 'xjc-wi-why', why));
+      const sum = el('div', 'xjc-wi-sum');
+      mid.appendChild(sum);
+      row.append(cb, mid);
+      const entries = el('div', 'xjc-wi-entries');
+      listBox.append(row, entries);
+      // 条目直接列出来，只显示酒馆里的状态（开 / 关、蓝灯 / 绿灯），要改去酒馆的世界书里改
+      if (names.includes(n)) loadBook(n).then(list => {
+        const on = list.filter(e => !e.disable);
+        const cnt = l => on.filter(e => lampOf(e) === l).length;
+        sum.textContent = [`开 ${on.length} / 共 ${list.length}`, cnt('constant') && `🔵 ${cnt('constant')}`, cnt('normal') && `🟢 ${cnt('normal')}`, cnt('vectorized') && `🔗 ${cnt('vectorized')}`].filter(Boolean).join(' · ');
+        for (const e of list) {
+          const r = el('div', `xjc-wi-entry${e.disable ? ' off' : ''}`);
+          const lamp = lampOf(e);
+          r.append(
+            el('span', 'xjc-wi-lamp', { constant: '🔵', normal: '🟢', vectorized: '🔗' }[lamp]),
+            el('span', 'xjc-grow', e.comment || (e.key || []).join('、') || `条目 ${e.uid}`),
+            el('span', 'xjc-wi-state', e.disable ? '已禁用' : { constant: '蓝灯', normal: '绿灯', vectorized: '向量' }[lamp]),
+            el('span', 'xjc-wi-state', wiPos(e)),
+          );
+          r.title = (e.key || []).length ? `关键词：${e.key.join('、')}` : '';
+          entries.appendChild(r);
+        }
+      }).catch(() => { sum.textContent = '读不到条目'; });
+    }
+  };
+  const reset = btn('恢复默认', () => { setSetting({ wiAdd: [], wiRemove: [] }); fill(); });
+  pickBox.append(field('用哪几本', listBox, '默认勾上酒馆现在开着的、当前角色卡绑定的（还有聊天、人设绑定的），在这上面增减。条目的开关和蓝灯绿灯是酒馆里的状态，要改去酒馆的世界书里改。换了角色，新角色卡绑定的书也会默认勾上；你取消过的书一直不用。'), reset);
+  const show = v => { pickBox.hidden = v !== 'pick'; if (v === 'pick') fill(); };
+  w.append(field('世界书来源', seg([{ v: 'sync', l: '同步酒馆' }, { v: 'pick', l: '自己选' }], S().wiSource === 'pick' ? 'pick' : 'sync', v => { setSetting({ wiSource: v }); show(v); }),
+    '同步酒馆：和酒馆聊天时用的世界书一样。自己选：在插件里勾用哪几本，不改酒馆自己的世界书设置。'), pickBox);
+  show(S().wiSource === 'pick' ? 'pick' : 'sync');
+  return w;
+}
+
 function renderSettings() {
   const v = views.settings;
   v.innerHTML = '';
@@ -1470,6 +1532,7 @@ function setGen(box) {
   box.appendChild(roundsF);
   roundsF.hidden = (S().defaultChat || 'recent') !== 'recent';
   box.appendChild(toggle('带世界书（和酒馆一样按聊天内容激活）', S().defaultWorldInfo !== false, v => setSetting({ defaultWorldInfo: v })));
+  box.appendChild(wiSourceBox());
   box.appendChild(toggle('带剧情总结', S().defaultSummary !== false, v => setSetting({ defaultSummary: v })));
   const style = select(Object.entries(STYLE_LABEL).map(([v, l]) => ({ v, l })), globalStyle());
   style.onchange = () => setSetting({ defaultStyle: style.value });

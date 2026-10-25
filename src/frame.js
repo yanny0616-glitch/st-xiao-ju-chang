@@ -135,8 +135,50 @@ export function themeTokens() {
   };
 }
 
+// 纯文字里的 Markdown：标题、> 引用、列表、分隔线、粗体 / 斜体 / 删除线 / 行内代码、||剧透||（点一下显示）。
+// 每行先转义再套标签，模型写的 HTML 不会被当成代码执行
+function inlineMd(s) {
+  return s
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\|\|(.+?)\|\|/g, '<span class="xjc-spoiler">$1</span>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s](?:[^*]*?[^*\s])?)\*(?!\*)/g, '$1<em>$2</em>')
+    .replace(/~~(.+?)~~/g, '<del>$1</del>');
+}
+const LIST_RE = /^\s*([-*+]|\d+[.)])\s+/;
 export function textToHtml(text) {
-  return String(text).split(/\n{2,}/).map(p => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+  const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let para = [];
+  const flush = () => { if (para.length) out.push(`<p>${para.map(l => inlineMd(esc(l))).join('<br>')}</p>`); para = []; };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) { flush(); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { flush(); out.push(`<h${h[1].length} class="xjc-h">${inlineMd(esc(h[2]))}</h${h[1].length}>`); continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { flush(); out.push('<hr>'); continue; }
+    if (/^\s*>/.test(line)) {
+      flush();
+      const q = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ''));
+      i--;
+      out.push(`<blockquote>${textToHtml(q.join('\n'))}</blockquote>`);
+      continue;
+    }
+    if (LIST_RE.test(line)) {
+      flush();
+      const ordered = /^\s*\d/.test(line);
+      const items = [];
+      while (i < lines.length && LIST_RE.test(lines[i]) && /^\s*\d/.test(lines[i]) === ordered) items.push(lines[i++].replace(LIST_RE, ''));
+      i--;
+      const tag = ordered ? 'ol' : 'ul';
+      out.push(`<${tag}>${items.map(it => `<li>${inlineMd(esc(it))}</li>`).join('')}</${tag}>`);
+      continue;
+    }
+    para.push(line);
+  }
+  flush();
+  return out.join('');
 }
 
 function frameDoc(segments, id, fill) {
@@ -151,6 +193,14 @@ html,body{margin:0;padding:0;background:var(--xjc-bg);color:var(--xjc-ink);font-
 *{box-sizing:border-box}img,video,canvas,svg,iframe{max-width:100%}
 .xjc-text p{margin:0 0 .9em;text-align:justify;word-break:break-word}
 .xjc-text p:last-child{margin-bottom:0}
+.xjc-text .xjc-h{margin:1em 0 .6em;line-height:1.35;color:var(--xjc-acc)}.xjc-text .xjc-h:first-child{margin-top:0}
+.xjc-text h1{font-size:1.45em}.xjc-text h2{font-size:1.3em}.xjc-text h3{font-size:1.15em}.xjc-text h4,.xjc-text h5,.xjc-text h6{font-size:1em}
+.xjc-text blockquote{margin:0 0 .9em;padding:.2em 0 .2em .9em;border-left:3px solid var(--xjc-acc);opacity:.88}
+.xjc-text blockquote p{text-indent:0!important}
+.xjc-text ul,.xjc-text ol{margin:0 0 .9em;padding-left:1.4em}.xjc-text li{margin:.2em 0}
+.xjc-text hr{border:0;border-top:1px solid var(--xjc-line);margin:1.2em 0}
+.xjc-text code{font-family:ui-monospace,Menlo,monospace;font-size:.9em;padding:0 .3em;border-radius:3px;background:color-mix(in srgb,var(--xjc-line) 45%,transparent)}
+.xjc-spoiler{border-radius:3px;background:var(--xjc-ink);color:transparent;cursor:pointer;transition:all .2s}.xjc-spoiler.on{background:color-mix(in srgb,var(--xjc-line) 45%,transparent);color:inherit}
 .xjc-text+.xjc-html,.xjc-html+.xjc-text,.xjc-html+.xjc-html{margin-top:16px}
 .xjc-html{max-width:100%;overflow-x:auto}
 [data-slot]:empty{display:inline-block;min-width:4em;min-height:1em;vertical-align:middle;border-radius:3px;background:linear-gradient(90deg,transparent 20%,var(--xjc-line) 50%,transparent 80%) 0 0/200% 100%;animation:xjc-sh 1.4s linear infinite;opacity:.7}
@@ -172,7 +222,7 @@ html[data-motion=off] *{animation:none!important;transition:none!important}
 <${script}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
 if(window.ResizeObserver){new ResizeObserver(send).observe(content)}window.addEventListener("load",send);setInterval(send,700);send();
 window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));if(d.motion===false)r.setAttribute("data-motion","off");else r.removeAttribute("data-motion");var u=document.getElementById("xjc-user");if(u&&typeof d.css==="string")u.textContent=d.css;send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
-document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${script}>
+document.addEventListener("click",function(e){var sp=e.target&&e.target.closest?e.target.closest(".xjc-spoiler"):null;if(sp){sp.classList.toggle("on");return}var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${script}>
 </body></html>`;
 }
 
