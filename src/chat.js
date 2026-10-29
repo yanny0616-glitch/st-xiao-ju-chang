@@ -69,7 +69,8 @@ export async function generateFor(mesId, { combo, extra, follow } = {}) {
   const ctrl = new AbortController();
   running.set(msg, { ctrl, name: use.name, t0: Date.now() });
   renderTail(mesId);
-  const tail = instr('tail');
+  // 「和这条消息有关」那句内置指令可以在设置里关掉
+  const tail = state.settings.tail.relate === false ? '' : instr('tail');
   try {
     // 接着写 / 追问时接的是前一篇小剧场，不再要求「和这条消息有关」
     const result = await generateTheater(use, { uptoIndex: mesId, extra: [follow ? '' : tail, extra].filter(Boolean).join('\n'), follow, signal: ctrl.signal });

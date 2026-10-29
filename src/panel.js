@@ -1890,6 +1890,7 @@ function setChat(box) {
   box.appendChild(more);
   more.hidden = !t.enabled;
   box = more;
+  box.appendChild(toggle('要求内容和那条消息有关（内置指令「挂在楼层下出」，关掉就不带这句）', t.relate !== false, v => put({ relate: v })));
   const askT = toggle('点面具按钮时先填这次的附加要求（可留空，直接确定就照常出）', t.askExtra, v => put({ askExtra: v }));
   box.appendChild(toggle('消息的「…」菜单里加面具按钮（点一下为这条出一篇）', t.button, v => { put({ button: v }); document.dispatchEvent(new CustomEvent('xjc-settings')); askT.hidden = !v; }));
   box.appendChild(askT);

@@ -70,7 +70,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   lengthLimit: true, defaultLength: "medium", defaultStyle: "free", defaultSpecId: "spec_mobile", stagedDefault: false, streamPreview: true, notifyDone: true,
   randomIncludesAi: true, recentKeep: 10, currentComboId: "c_store", defaultPreambleId: "pre_strict",
   api: "st", maxTokens: 4096,
-  tail: { enabled: false, button: true, askExtra: false, auto: false, autoOnSwipe: false, chance: 30, pick: "random", comboId: "", expanded: false },
+  tail: { enabled: false, relate: true, button: true, askExtra: false, auto: false, autoOnSwipe: false, chance: 30, pick: "random", comboId: "", expanded: false },
   seeded: false,
 });
 const LENGTH_CHARS = { short: 400, medium: 900, long: 1800 };
