@@ -726,19 +726,30 @@ function viewPrompt(p, { isPicked, onToggle, onChange } = {}) {
 }
 
 function libCombos(box) {
+  const picked = libBatch.combos;
   const row = el('div', 'xjc-row');
   row.append(btn('＋ 新建小剧场', () => editCombo(null), 'xjc-btn pri'), btn('导入', importFlow, 'xjc-btn'));
+  if (state.combos.length) row.appendChild(batchToggle('combos'));
   box.appendChild(row);
   const list = el('div', 'xjc-list xjc-cards');
   list.style.marginTop = '12px';
-  if (!state.combos.length) list.appendChild(el('div', 'xjc-empty', '一个小剧场 = 前置要求 + 几条提示词 + 随机规则 + 输出方式。'));
-  for (const c of state.combos) {
-    const n = comboPromptIds(c).length;
-    const cur = c.id === state.settings.currentComboId;
-    const rc = resolveCombo(c);
-    list.appendChild(itemRow(`${c.fav ? '★ ' : ''}${c.name}${cur ? ' · 当前' : ''}`, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${rc.channel === 'preset' ? '走酒馆预设' : contextLabel(rc.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`));
-  }
-  box.appendChild(list);
+  const bar = el('div', 'xjc-actions xjc-batch-bar');
+  const paint = () => {
+    list.innerHTML = '';
+    if (!state.combos.length) list.appendChild(el('div', 'xjc-empty', '一个小剧场 = 前置要求 + 几条提示词 + 随机规则 + 输出方式。'));
+    for (const c of state.combos) {
+      const n = comboPromptIds(c).length;
+      const cur = c.id === state.settings.currentComboId;
+      const rc = resolveCombo(c);
+      const title = `${c.fav ? '★ ' : ''}${c.name}${cur ? ' · 当前' : ''}`;
+      const desc = `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${rc.channel === 'preset' ? '走酒馆预设' : contextLabel(rc.context)}`;
+      const end = `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`;
+      list.appendChild(picked ? pickRow(title, desc, picked, c.id, paint, end) : itemRow(title, desc, () => editCombo(c), end));
+    }
+    fillBatchBar(bar, 'combos', picked, state.combos, paint);
+  };
+  box.append(list, bar);
+  paint();
 }
 function allTags(list) { return [...new Set(list.flatMap(x => x.tags || []))]; }
 /**
@@ -810,25 +821,43 @@ function fillGroup(kind, g, onChange) {
     const name = g ? null : input('', '比如：塔罗、日常场景');
     if (name) body.appendChild(field('分组名', name));
     const chosen = new Set();
-    const list = el('div', 'xjc-list');
-    // 往已有分组里放：列出不在这个组里的；新建分组：全部列出
+    // 往已有分组里放：列出不在这个组里的；新建分组：全部列出。能按分组筛、能搜，默认只看「未分组」的
     const rows = g ? state[kind].filter(r => (r.group || '') !== g) : state[kind];
-    if (!rows.length) list.appendChild(el('div', 'xjc-empty', `没有别的${label}了`));
-    for (const r of rows) {
-      const row = el('label', 'xjc-check');
-      const cb = el('input');
-      cb.type = 'checkbox';
-      cb.onchange = () => (cb.checked ? chosen.add(r.id) : chosen.delete(r.id));
-      const mid = el('div', 'xjc-grow');
-      mid.append(el('div', '', r.title), el('div', 'd', `${(r.group || '').trim() || UNGROUPED}${(r.tags || []).length ? ' · ' + r.tags.map(t => '#' + t).join(' ') : ''}`));
-      row.append(cb, mid);
-      list.appendChild(row);
-    }
+    const others = groupsOf(kind).filter(x => x !== g);
+    const hasLoose = rows.some(r => !(r.group || '').trim());
+    const gsel = select([{ v: '', l: '全部' }, { v: NO_GROUP, l: UNGROUPED }, ...others.map(x => ({ v: x, l: x }))], hasLoose ? NO_GROUP : '');
+    const search = input('', '搜标题 / 内容 / 标签');
+    search.type = 'search';
+    const filt = el('div', 'xjc-grid2');
+    filt.append(field('来自', gsel), field('搜索', search));
+    if (rows.length) body.appendChild(filt);
+    const list = el('div', 'xjc-list');
+    let shown = [];
+    const paint = () => {
+      list.innerHTML = '';
+      const q = search.value.trim().toLowerCase();
+      shown = rows.filter(r => inGroup(r, gsel.value) && (!q || [r.title, r.content, ...(r.tags || [])].join(' ').toLowerCase().includes(q)));
+      if (!shown.length) list.appendChild(el('div', 'xjc-empty', rows.length ? '没有匹配的条目' : `没有别的${label}了`));
+      for (const r of shown) {
+        const row = el('label', 'xjc-check');
+        const cb = el('input');
+        cb.type = 'checkbox';
+        cb.checked = chosen.has(r.id);
+        cb.onchange = () => (cb.checked ? chosen.add(r.id) : chosen.delete(r.id));
+        const mid = el('div', 'xjc-grow');
+        mid.append(el('div', '', r.title), el('div', 'd', `${(r.group || '').trim() || UNGROUPED}${(r.tags || []).length ? ' · ' + r.tags.map(t => '#' + t).join(' ') : ''}`));
+        row.append(cb, mid);
+        list.appendChild(row);
+      }
+    };
+    gsel.onchange = paint;
+    search.oninput = paint;
+    paint();
     body.appendChild(field(`勾上要放进来的${label}`, list, g ? '' : '可以先不勾，建好以后在分组标题上点「＋」再放，或者编辑提示词时在「分组」里选。'));
     if (rows.length) foot.appendChild(btn('全选 / 全不选', () => {
-      const boxes = [...list.querySelectorAll('input[type=checkbox]')];
-      const all = boxes.every(cb => cb.checked);
-      boxes.forEach(cb => { cb.checked = !all; cb.onchange(); });
+      const all = shown.every(r => chosen.has(r.id));
+      shown.forEach(r => (all ? chosen.delete(r.id) : chosen.add(r.id)));
+      paint();
     }, 'xjc-btn ghost'));
     foot.appendChild(btn(g ? '放进来' : '新建', async () => {
       const n = g || name.value.trim().slice(0, 30);
@@ -904,8 +933,10 @@ function renameGroup(kind, g, onChange) {
 }
 const libQuery = { prompts: '', randoms: '' };
 const libTag = { prompts: '', randoms: '' };
-// 批量管理：进入后是选中的 id 集合，平时 null
-const libBatch = { prompts: null, randoms: null };
+const libGroup = { prompts: '', randoms: '' };
+// 分组筛选里的「未分组」
+const NO_GROUP = '\u0000none';
+const inGroup = (r, g) => (g === NO_GROUP ? !(r.group || '').trim() : !g || (r.group || '').trim() === g);
 /** 提示词 / 随机池共用：搜索、标签筛选、按组显示 */
 function libEntries(box, kind) {
   const label = kind === 'prompts' ? '提示词' : '随机条目';
@@ -913,7 +944,7 @@ function libEntries(box, kind) {
   row.append(btn(`＋ 新增${label}`, () => editText(kind, null), 'xjc-btn pri'));
   if (kind === 'prompts') row.appendChild(btn('批量导入', importFlow, 'xjc-btn'));
   row.appendChild(btn('＋ 新建分组', () => fillGroup(kind, '', renderLibrary), 'xjc-btn'));
-  if (state[kind].length) row.appendChild(btn(libBatch[kind] ? '退出批量' : '批量管理', () => { libBatch[kind] = libBatch[kind] ? null : new Set(); renderLibrary(); }, 'xjc-btn'));
+  if (state[kind].length) row.appendChild(batchToggle(kind));
   // 没分过组、但有标签的：一键按第一个标签分好
   const canAuto = state[kind].some(r => !(r.group || '').trim() && (r.tags || []).length);
   if (canAuto) row.appendChild(btn('按第一个标签分组', async () => {
@@ -932,44 +963,21 @@ function libEntries(box, kind) {
   const paint = () => {
     list.innerHTML = '';
     const q = libQuery[kind].trim().toLowerCase();
-    const rows = state[kind].filter(r => (!libTag[kind] || (r.tags || []).includes(libTag[kind])) && (!q || [r.title, r.content, r.group, ...(r.tags || [])].join(' ').toLowerCase().includes(q)));
+    const rows = state[kind].filter(r => inGroup(r, libGroup[kind]) && (!libTag[kind] || (r.tags || []).includes(libTag[kind])) && (!q || [r.title, r.content, r.group, ...(r.tags || [])].join(' ').toLowerCase().includes(q)));
     shown = rows;
-    paintBar();
+    fillBatchBar(bar, kind, picked, shown, paint);
     if (!state[kind].length) { list.appendChild(el('div', 'xjc-empty', kind === 'prompts' ? '场景、if 线、文字形式、前端形式都放这里，用分组整理，用标签筛选。' : '随机池是空的。')); return; }
     if (!rows.length) { list.appendChild(el('div', 'xjc-empty', '没有匹配的条目。')); return; }
     const rowOf = r => {
       const desc = `${(r.tags || []).map(t => '#' + t).join(' ')} ${String(r.content || '').replace(/\s+/g, ' ').slice(0, 60)}`;
       if (!picked) return itemRow(`${r.fav ? '★ ' : ''}${r.title}`, desc, () => editText(kind, r));
-      // 批量管理时点一行就是勾选
-      const it = itemRow(`${r.fav ? '★ ' : ''}${r.title}`, desc, () => { picked.has(r.id) ? picked.delete(r.id) : picked.add(r.id); paint(); });
-      const cb = el('input', 'xjc-batch-cb');
-      cb.type = 'checkbox';
-      cb.tabIndex = -1;
-      cb.checked = picked.has(r.id);
-      it.prepend(cb);
-      it.classList.toggle('on', cb.checked);
-      return it;
+      return pickRow(`${r.fav ? '★ ' : ''}${r.title}`, desc, picked, r.id, paint);
     };
     const whole = picked ? (g, inG) => {
       const all = inG.every(r => picked.has(r.id));
       return btn(all ? '全不选' : '全选', e => { e.stopPropagation(); inG.forEach(r => (all ? picked.delete(r.id) : picked.add(r.id))); paint(); }, 'xjc-btn sm ghost');
     } : null;
-    groupedList(list, kind, rows, rowOf, { open: !!(q || libTag[kind] || picked), manage: !picked, headExtra: whole, onChange: renderLibrary });
-  };
-  // 批量管理的操作条：已选几条、全选当前显示的、放进分组、删除
-  const paintBar = () => {
-    bar.hidden = !picked;
-    if (!picked) return;
-    bar.innerHTML = '';
-    const all = shown.length && shown.every(r => picked.has(r.id));
-    bar.append(
-      el('span', 'xjc-grow xjc-batch-n', `已选 ${picked.size} 条`),
-      btn(all ? '全不选' : '全选', () => { shown.forEach(r => (all ? picked.delete(r.id) : picked.add(r.id))); paint(); }, 'xjc-btn sm ghost'),
-    );
-    const mv = btn('放进分组…', () => batchGroup(kind, picked, renderLibrary), 'xjc-btn sm');
-    const del = btn('删除', () => batchDelete(kind, picked, renderLibrary), 'xjc-btn sm danger');
-    mv.disabled = del.disabled = !picked.size;
-    bar.append(mv, del);
+    groupedList(list, kind, rows, rowOf, { open: !!(q || libTag[kind] || libGroup[kind] || picked), manage: !picked, headExtra: whole, onChange: renderLibrary });
   };
   if (state[kind].length > 6) {
     const search = input(libQuery[kind], '搜标题 / 内容 / 分组 / 标签');
@@ -977,6 +985,14 @@ function libEntries(box, kind) {
     search.style.marginTop = '12px';
     search.oninput = () => { libQuery[kind] = search.value; paint(); };
     box.appendChild(search);
+  }
+  const groups = groupsOf(kind);
+  if (groups.length) {
+    if (libGroup[kind] && libGroup[kind] !== NO_GROUP && !groups.includes(libGroup[kind])) libGroup[kind] = '';
+    const gsel = select([{ v: '', l: '全部分组' }, { v: NO_GROUP, l: UNGROUPED }, ...groups.map(g => ({ v: g, l: g }))], libGroup[kind]);
+    gsel.style.marginTop = '10px';
+    gsel.onchange = () => { libGroup[kind] = gsel.value; paint(); };
+    box.appendChild(gsel);
   }
   const tags = allTags(state[kind]);
   if (tags.length) {
@@ -993,6 +1009,39 @@ function libEntries(box, kind) {
   list.style.marginTop = '12px';
   box.append(list, bar);
   paint();
+}
+// ── 批量管理 ──
+// 每个库进「批量管理」后是选中的 id 集合，平时 null
+const libBatch = { prompts: null, randoms: null, combos: null, preambles: null, specs: null };
+const LIB_LABEL = { prompts: '提示词', randoms: '随机条目', combos: '小剧场', preambles: '前置要求', specs: 'HTML 规范' };
+const batchToggle = kind => btn(libBatch[kind] ? '退出批量' : '批量管理', () => { libBatch[kind] = libBatch[kind] ? null : new Set(); renderLibrary(); }, 'xjc-btn');
+/** 批量时的一行：前面一个勾，点整行就是勾选 */
+function pickRow(title, desc, picked, id, repaint, end) {
+  const it = itemRow(title, desc, () => { picked.has(id) ? picked.delete(id) : picked.add(id); repaint(); }, end);
+  const cb = el('input', 'xjc-batch-cb');
+  cb.type = 'checkbox';
+  cb.tabIndex = -1;
+  cb.checked = picked.has(id);
+  it.prepend(cb);
+  it.classList.toggle('on', cb.checked);
+  return it;
+}
+/** 底部操作条：已选几条、全选（当前显示的）、这一类能做的操作。不在批量管理时收起 */
+function fillBatchBar(bar, kind, picked, shown, repaint) {
+  bar.hidden = !picked;
+  bar.innerHTML = '';
+  if (!picked) return;
+  const all = shown.length && shown.every(r => picked.has(r.id));
+  bar.append(
+    el('span', 'xjc-grow xjc-batch-n', `已选 ${picked.size} 条`),
+    btn(all ? '全不选' : '全选', () => { shown.forEach(r => (all ? picked.delete(r.id) : picked.add(r.id))); repaint(); }, 'xjc-btn sm ghost'),
+  );
+  const ops = [];
+  if (kind === 'prompts' || kind === 'randoms') ops.push(btn('放进分组…', () => batchGroup(kind, picked, renderLibrary), 'xjc-btn sm'));
+  if (kind === 'prompts' || kind === 'randoms' || kind === 'combos') ops.push(btn('标签…', () => batchTags(kind, picked, renderLibrary), 'xjc-btn sm'));
+  ops.push(btn('删除', () => batchDelete(kind, picked, renderLibrary), 'xjc-btn sm danger'));
+  for (const b of ops) b.disabled = !picked.size;
+  bar.append(...ops);
 }
 /** 批量放进分组（选「未分组」就是移出分组） */
 function batchGroup(kind, ids, done) {
@@ -1011,22 +1060,67 @@ function batchGroup(kind, ids, done) {
     }, 'xjc-btn pri'));
   });
 }
-/** 批量删除；删的提示词从用到它的小剧场里摘掉 */
+/** 批量改标签：加上几个、去掉几个 */
+function batchTags(kind, ids, done) {
+  openSheet(`给 ${ids.size} 条改标签`, (body, foot, closeIt) => {
+    const rows = state[kind].filter(r => ids.has(r.id));
+    const addIn = tagInput([], allTags(state[kind]));
+    body.appendChild(field('加上', addIn, '点已有的标签，或者打新的回车。'));
+    const has = allTags(rows);
+    const rm = new Set();
+    if (has.length) {
+      const chips = el('div', 'xjc-chips');
+      for (const t of has) {
+        const c = el('button', 'xjc-chip', `#${t}`);
+        c.type = 'button';
+        c.onclick = () => { rm.has(t) ? rm.delete(t) : rm.add(t); c.classList.toggle('on', rm.has(t)); };
+        chips.appendChild(c);
+      }
+      body.appendChild(field('去掉', chips, '选中的这几条身上有的标签；点亮的会从它们身上去掉。'));
+    }
+    foot.appendChild(btn('应用', async () => {
+      const add = textToTags(addIn.value);
+      if (!add.length && !rm.size) { toast('没有要改的'); return; }
+      for (const r of rows) r.tags = [...new Set([...(r.tags || []).filter(t => !rm.has(t)), ...add])].slice(0, 20);
+      await save(kind);
+      toast(`改好了 ${rows.length} 条的标签`, 'success');
+      closeIt(); done();
+    }, 'xjc-btn pri'));
+  });
+}
+/** 批量删除：用到它们的地方一起改好（小剧场里摘掉提示词、前置改用第一条、规范改跟随全局、当前小剧场换一个） */
 async function batchDelete(kind, ids, done) {
-  const label = kind === 'prompts' ? '提示词' : '随机条目';
-  const used = kind === 'prompts' ? state.combos.filter(c => [...ids].some(id => usesPrompt(c, id))).map(c => c.name) : [];
-  const warn = used.length ? `「${used.join('、')}」用到了其中的${label}，删了这些小剧场里就少了它们。` : '';
+  const label = LIB_LABEL[kind];
+  if (kind === 'preambles' && ids.size >= state.preambles.length) { toast('至少留一条前置要求'); return; }
+  const usedBy = { prompts: c => [...ids].some(id => usesPrompt(c, id)), preambles: c => ids.has(c.preambleId), specs: c => ids.has(c.output?.spec) }[kind];
+  const used = usedBy ? state.combos.filter(c => !ids.has(c.id) && usedBy(c)).map(c => c.name) : [];
+  const after = { prompts: '删了这些小剧场里就少了它们', preambles: '删了之后它们改用剩下的第一条前置', specs: '删了之后它们改成跟随全局' }[kind];
+  const warn = used.length ? `「${used.join('、')}」用到了其中的${label}，${after}。` : '';
   if (!(await confirmSheet('批量删除', `删除选中的 ${ids.size} 条${label}？${warn}删了不能恢复。`, '删除', true))) return;
   state[kind] = state[kind].filter(r => !ids.has(r.id));
   const tasks = [save(kind)];
+  const patch = {};
   if (kind === 'prompts') {
-    if (used.length) {
-      for (const c of state.combos) for (const pt of c.parts || []) pt.items = pt.items.filter(it => !(it.startsWith('p:') && ids.has(it.slice(2))));
-      tasks.push(save('combos'));
-    }
-    const stage = (S().stagePromptIds || []).filter(id => !ids.has(id));
-    if (stage.length !== (S().stagePromptIds || []).length) tasks.push(setSetting({ stagePromptIds: stage }));
+    for (const c of state.combos) for (const pt of c.parts || []) pt.items = pt.items.filter(it => !(it.startsWith('p:') && ids.has(it.slice(2))));
+    if ((S().stagePromptIds || []).some(id => ids.has(id))) patch.stagePromptIds = S().stagePromptIds.filter(id => !ids.has(id));
   }
+  if (kind === 'preambles') {
+    const fb = state.preambles[0].id;
+    for (const c of state.combos) if (ids.has(c.preambleId)) c.preambleId = fb;
+    if (ids.has(S().defaultPreambleId)) patch.defaultPreambleId = fb;
+    if (ids.has(S().stagePreambleId)) patch.stagePreambleId = fb;
+  }
+  if (kind === 'specs') {
+    for (const c of state.combos) if (ids.has(c.output?.spec)) c.output.spec = '';
+    if (ids.has(S().defaultSpecId)) patch.defaultSpecId = state.specs[0]?.id || 'none';
+    if (ids.has(S().stageSpecId)) patch.stageSpecId = '';
+  }
+  if (kind === 'combos') {
+    if (ids.has(S().currentComboId)) patch.currentComboId = state.combos[0]?.id || '';
+    if (ids.has(S().tail?.comboId)) patch.tail = { ...S().tail, comboId: state.combos[0]?.id || '' };
+  }
+  if (used.length) tasks.push(save('combos'));
+  if (Object.keys(patch).length) tasks.push(setSetting(patch));
   await Promise.all(tasks);
   toast(`删了 ${ids.size} 条`, 'success');
   ids.clear();
@@ -1047,27 +1141,50 @@ function libRandoms(box) {
   box.appendChild(r2);
 }
 function libPreambles(box) {
+  const picked = libBatch.preambles;
   const row = el('div', 'xjc-row');
   row.appendChild(btn('＋ 新增前置要求', () => editText('preambles', null), 'xjc-btn pri'));
+  if (state.preambles.length > 1) row.appendChild(batchToggle('preambles'));
   box.appendChild(row);
   const list = el('div', 'xjc-list');
   list.style.marginTop = '12px';
-  for (const p of state.preambles) { const used = state.combos.filter(c => c.preambleId === p.id).length; list.appendChild(itemRow(p.name, p.content.replace(/\s+/g, ' ').slice(0, 70), () => editText('preambles', p), [p.id === state.settings.defaultPreambleId ? '默认' : '', used ? `${used} 个小剧场在用` : ''].filter(Boolean).join(' · '))); }
-  box.appendChild(list);
-  box.appendChild(el('p', 'xjc-hint', '发给模型的顺序：① 材料（角色卡、用户人设、世界书、总结、最近聊天，按小剧场的设置取）② 前置要求 ③ <Brief>（提示词、随机、输出要求）。酒馆预设里的破限、文风、正文格式条目都不会带进来；需要的话写进前置要求。'));
+  const bar = el('div', 'xjc-actions xjc-batch-bar');
+  const paint = () => {
+    list.innerHTML = '';
+    for (const p of state.preambles) {
+      const used = state.combos.filter(c => c.preambleId === p.id).length;
+      const desc = p.content.replace(/\s+/g, ' ').slice(0, 70);
+      const end = [p.id === state.settings.defaultPreambleId ? '默认' : '', used ? `${used} 个小剧场在用` : ''].filter(Boolean).join(' · ');
+      list.appendChild(picked ? pickRow(p.name, desc, picked, p.id, paint, end) : itemRow(p.name, desc, () => editText('preambles', p), end));
+    }
+    fillBatchBar(bar, 'preambles', picked, state.preambles, paint);
+  };
+  paint();
+  box.append(list, el('p', 'xjc-hint', '发给模型的顺序：① 材料（角色卡、用户人设、世界书、总结、最近聊天，按小剧场的设置取）② 前置要求 ③ <Brief>（提示词、随机、输出要求）。酒馆预设里的破限、文风、正文格式条目都不会带进来；需要的话写进前置要求。'), bar);
 }
-
 function libSpecs(box) {
+  const picked = libBatch.specs;
   const row = el('div', 'xjc-row');
   row.appendChild(btn('＋ 新增 HTML 规范', () => editText('specs', null), 'xjc-btn pri'));
+  if (state.specs.length) row.appendChild(batchToggle('specs'));
   box.appendChild(row);
   const list = el('div', 'xjc-list');
   list.style.marginTop = '12px';
-  const def = globalSpec();
-  if (!state.specs.length) list.appendChild(el('div', 'xjc-empty', '还没有 HTML 规范，HTML 小剧场只按提示词写。'));
-  for (const p of state.specs) { const used = state.combos.filter(c => c.output?.spec === p.id).length; list.appendChild(itemRow(p.name, p.content.replace(/\s+/g, ' ').slice(0, 70), () => editText('specs', p), [p.id === def ? '默认' : '', used ? `${used} 个小剧场指定用它` : ''].filter(Boolean).join(' · '))); }
-  box.appendChild(list);
-  box.appendChild(el('p', 'xjc-hint', 'HTML 怎么写的规定：布局、尺寸、字号、能不能引外部资源……小剧场输出是 HTML 或混排时（分两步的骨架也算），选中的那条放进 <Brief> 的【HTML 规范】。每个小剧场在「编辑 → 输出 → HTML 规范」选用哪条或不带，默认跟随「设置 → 生成」。纯文字的小剧场不带。'));
+  const bar = el('div', 'xjc-actions xjc-batch-bar');
+  const paint = () => {
+    list.innerHTML = '';
+    const def = globalSpec();
+    if (!state.specs.length) list.appendChild(el('div', 'xjc-empty', '还没有 HTML 规范，HTML 小剧场只按提示词写。'));
+    for (const p of state.specs) {
+      const used = state.combos.filter(c => c.output?.spec === p.id).length;
+      const desc = p.content.replace(/\s+/g, ' ').slice(0, 70);
+      const end = [p.id === def ? '默认' : '', used ? `${used} 个小剧场指定用它` : ''].filter(Boolean).join(' · ');
+      list.appendChild(picked ? pickRow(p.name, desc, picked, p.id, paint, end) : itemRow(p.name, desc, () => editText('specs', p), end));
+    }
+    fillBatchBar(bar, 'specs', picked, state.specs, paint);
+  };
+  paint();
+  box.append(list, el('p', 'xjc-hint', 'HTML 怎么写的规定：布局、尺寸、字号、能不能引外部资源……小剧场输出是 HTML 或混排时（分两步的骨架也算），选中的那条放进 <Brief> 的【HTML 规范】。每个小剧场在「编辑 → 输出 → HTML 规范」选用哪条或不带，默认跟随「设置 → 生成」。纯文字的小剧场不带。'), bar);
 }
 
 /** 内置指令：每条一个输入框，改过的标「已改」、能单独恢复默认；保存时和默认一样的就当没改 */

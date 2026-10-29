@@ -686,6 +686,12 @@ async function desktop(browser) {
   await page.click('.xjc-sheet-ft .xjc-btn:has-text("放进去")');
   await sleep(300);
   ok((await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.filter(p => p.group === '批量测试').length)) === 0, '批量管理：分组标题上全选，选「未分组」移出');
+  // 列表按分组筛：只看未分组，全选只勾筛出来的
+  await page.selectOption('.xjc-view[data-view=library] select', '\u0000none');
+  await page.click('.xjc-batch-bar .xjc-btn:has-text("全选")');
+  const looseN = await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.filter(p => !(p.group || '').trim()).length);
+  ok((await page.textContent('.xjc-batch-n')) === `已选 ${looseN} 条`, '批量管理：筛「未分组」后全选只勾未分组的');
+  await page.selectOption('.xjc-view[data-view=library] select', '');
   await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("退出批量")');
 
   // 7d1b. 「换一个」里可以标爱用、按爱用筛选；小剧场和提示词都能点开看全文
