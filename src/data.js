@@ -65,7 +65,7 @@ function normalizeCombo(c) {
 const normalizers = {
   preambles: r => ({ id: str(r.id, 80), name: str(r.name, 60) || '未命名', content: str(r.content) }),
   specs: r => ({ id: str(r.id, 80), name: str(r.name, 60) || '未命名', content: str(r.content, 60000) }),
-  prompts: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content) }),
+  prompts: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content), fav: r.fav === true }),
   randoms: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content) }),
   macros: r => ({
     id: str(r.id, 80), name: str(r.name, 30) || '未命名', kind: r.kind === 'number' ? 'number' : 'words',

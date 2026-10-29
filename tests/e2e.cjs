@@ -685,6 +685,8 @@ async function desktop(browser) {
   await page.evaluate(() => document.querySelectorAll('.xjc-sheet details').forEach(d => { d.open = true; }));
   await page.click('.xjc-sheet .xjc-item:has(.t:text-is("深夜便利店")) .xjc-btn[title="查看"]');
   ok((await page.textContent('.xjc-sheet .xjc-pre-full')).includes('店员在打瞌睡'), '提示词详情显示全文');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("爱用") >> nth=-1');
+  ok(await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.find(p => p.title === '深夜便利店').fav === true), '提示词也能标爱用');
   await page.click('.xjc-sheet .xjc-x >> nth=-1');
   await page.click('.xjc-sheet .xjc-x');
   await page.click('.xjc-tabs button[data-v="library"]');

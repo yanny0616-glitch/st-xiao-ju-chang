@@ -331,11 +331,11 @@ function pickCombo() {
     const newBtn = btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn');
     foot.append(newBtn, useBtn);
     let tags = [];
-    // 小剧场可以标「爱用」：筛选里多一个「★ 爱用」，列表里排在前面
+    // 小剧场和提示词都可以标「爱用」：筛选里多一个「★ 爱用」，列表里排在前面
     const FAV = '\u0000fav';
     const build = () => {
       tags = allTags(mode === 'combos' ? state.combos : state.prompts);
-      chips.hidden = !tags.length && mode !== 'combos';
+      chips.hidden = false;
       hint.hidden = preF.hidden = outF.hidden = mode !== 'prompts';
       search.hidden = (mode === 'combos' ? state.combos : state.prompts).length <= 6;
       newBtn.hidden = mode !== 'combos';
@@ -345,8 +345,8 @@ function pickCombo() {
     const paintUse = () => { useBtn.textContent = picked.size ? `用这 ${picked.size} 条` : '用选中的提示词'; };
     const drawTags = () => {
       chips.innerHTML = '';
-      for (const t of ['', ...(mode === 'combos' ? [FAV] : []), ...tags]) {
-        const c = el('button', 'xjc-chip' + (tag === t ? ' on' : ''), t === FAV ? `★ 爱用 ${state.combos.filter(x => x.fav).length}` : t ? '#' + t : '全部');
+      for (const t of ['', FAV, ...tags]) {
+        const c = el('button', 'xjc-chip' + (tag === t ? ' on' : ''), t === FAV ? `★ 爱用 ${(mode === 'combos' ? state.combos : state.prompts).filter(x => x.fav).length}` : t ? '#' + t : '全部');
         c.type = 'button';
         c.onclick = () => { tag = t; drawTags(); draw(); };
         chips.appendChild(c);
@@ -355,8 +355,9 @@ function pickCombo() {
     const draw = () => {
       list.innerHTML = '';
       if (mode === 'prompts') {
-        const shownP = state.prompts.filter(p => (!tag || (p.tags || []).includes(tag)) && (!q || (p.title + ' ' + (p.group || '') + ' ' + (p.tags || []).join(' ')).toLowerCase().includes(q)));
-        if (!shownP.length) list.appendChild(el('div', 'xjc-empty', state.prompts.length ? '没有匹配的提示词' : '提示词库是空的'));
+        const shownP = state.prompts.filter(p => (tag === FAV ? p.fav : !tag || (p.tags || []).includes(tag)) && (!q || (p.title + ' ' + (p.group || '') + ' ' + (p.tags || []).join(' ')).toLowerCase().includes(q)))
+          .sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
+        if (!shownP.length) list.appendChild(el('div', 'xjc-empty', tag === FAV ? '还没有爱用的提示词，点每行的 ☆ 标一条。' : state.prompts.length ? '没有匹配的提示词' : '提示词库是空的'));
         const order = [...picked];
         const rowOf = p => {
           const it = itemRow(p.title, `${(p.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${String(p.content || '').replace(/\s+/g, ' ').slice(0, 40)}`, () => {
@@ -364,9 +365,9 @@ function pickCombo() {
             draw();
           }, picked.has(p.id) ? `第 ${order.indexOf(p.id) + 1} 条` : '');
           if (picked.has(p.id)) it.classList.add('on');
-          it.appendChild(ibtn('fa-eye', '查看', e => {
+          it.append(favBtn(p, 'prompts', () => { drawTags(); draw(); }), ibtn('fa-eye', '查看', e => {
             e.stopPropagation();
-            viewPrompt(p, { isPicked: () => picked.has(p.id), onToggle: () => { if (picked.has(p.id)) picked.delete(p.id); else picked.add(p.id); draw(); }, onChange: draw });
+            viewPrompt(p, { isPicked: () => picked.has(p.id), onToggle: () => { if (picked.has(p.id)) picked.delete(p.id); else picked.add(p.id); draw(); }, onChange: () => { drawTags(); draw(); } });
           }));
           return it;
         };
@@ -387,7 +388,7 @@ function pickCombo() {
         const it = itemRow(c.name, `${(c.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`, () => use(c), on ? '当前' : '');
         if (on) it.classList.add('on');
         it.append(
-          favComboBtn(c, () => { drawTags(); draw(); }),
+          favBtn(c, 'combos', () => { drawTags(); draw(); }),
           ibtn('fa-eye', '查看', e => { e.stopPropagation(); viewCombo(c, { onUse: () => use(c), onEdit: () => { closeIt(); editCombo(c); }, onChange: () => { drawTags(); draw(); } }); }),
         );
         list.appendChild(it);
@@ -670,9 +671,9 @@ function itemRow(title, desc, onClick, end) {
   item.onclick = onClick;
   return item;
 }
-/** 「爱用」星标按钮：实心 = 爱用 */
-function favComboBtn(c, onChange) {
-  const b = ibtn('fa-star', '', e => { e.stopPropagation(); c.fav = !c.fav; save('combos'); paint(); onChange?.(); });
+/** 「爱用」星标按钮（小剧场、提示词）：实心 = 爱用 */
+function favBtn(c, kind, onChange) {
+  const b = ibtn('fa-star', '', e => { e.stopPropagation(); c.fav = !c.fav; save(kind); paint(); onChange?.(); });
   const paint = () => { b.innerHTML = `<i class="${c.fav ? 'fa-solid' : 'fa-regular'} fa-star"></i>`; b.title = c.fav ? '取消爱用' : '标为爱用'; b.setAttribute('aria-label', b.title); b.classList.toggle('xjc-on', !!c.fav); };
   paint();
   return b;
@@ -710,7 +711,10 @@ function viewPrompt(p, { isPicked, onToggle, onChange } = {}) {
     const meta = [p.group ? `分组：${p.group}` : '', (p.tags || []).map(t => '#' + t).join(' ')].filter(Boolean).join(' · ');
     if (meta) body.appendChild(el('p', 'xjc-hint', meta));
     body.appendChild(el('pre', 'xjc-pre xjc-pre-full', p.content || '（空）'));
-    foot.appendChild(btn('编辑', () => { closeIt(); editText('prompts', p, onChange); }, 'xjc-btn'));
+    const fav = btn('', () => { p.fav = !p.fav; save('prompts'); paintFav(); onChange?.(); }, 'xjc-btn ghost');
+    const paintFav = () => { fav.textContent = p.fav ? '★ 爱用' : '☆ 爱用'; };
+    paintFav();
+    foot.append(fav, btn('编辑', () => { closeIt(); editText('prompts', p, onChange); }, 'xjc-btn'));
     if (onToggle) foot.appendChild(btn(isPicked() ? '去掉' : '选上', () => { onToggle(); closeIt(); }, 'xjc-btn pri'));
   });
 }
@@ -913,7 +917,7 @@ function libEntries(box, kind) {
     const rows = state[kind].filter(r => (!libTag[kind] || (r.tags || []).includes(libTag[kind])) && (!q || [r.title, r.content, r.group, ...(r.tags || [])].join(' ').toLowerCase().includes(q)));
     if (!state[kind].length) { list.appendChild(el('div', 'xjc-empty', kind === 'prompts' ? '场景、if 线、文字形式、前端形式都放这里，用分组整理，用标签筛选。' : '随机池是空的。')); return; }
     if (!rows.length) { list.appendChild(el('div', 'xjc-empty', '没有匹配的条目。')); return; }
-    groupedList(list, kind, rows, r => itemRow(r.title, `${(r.tags || []).map(t => '#' + t).join(' ')} ${String(r.content || '').replace(/\s+/g, ' ').slice(0, 60)}`, () => editText(kind, r)), { open: !!(q || libTag[kind]), onChange: renderLibrary });
+    groupedList(list, kind, rows, r => itemRow(`${r.fav ? '★ ' : ''}${r.title}`, `${(r.tags || []).map(t => '#' + t).join(' ')} ${String(r.content || '').replace(/\s+/g, ' ').slice(0, 60)}`, () => editText(kind, r)), { open: !!(q || libTag[kind]), onChange: renderLibrary });
   };
   if (state[kind].length > 6) {
     const search = input(libQuery[kind], '搜标题 / 内容 / 分组 / 标签');
