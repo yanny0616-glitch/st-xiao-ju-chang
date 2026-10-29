@@ -448,7 +448,12 @@ function updateBusyButtons() {
 /** 结果卡。pending=true 时是占位（流式 / 骨架） */
 function showResult(result, { pending = false, status = '', onRetry } = {}) {
   const host = stageBox.result;
-  host.innerHTML = '';
+  // 换掉上一张卡时（写完、骨架出来、点最近）：新卡先在原位置底下悄悄加载，好了再替换，
+  // 高度沿用旧卡的，免得先空一下、高度从头长
+  host.querySelectorAll('.xjc-swap-in').forEach(c => c.remove());
+  const old = host.querySelector('.xjc-result');
+  const oldH = old?.querySelector('.xjc-frame')?.offsetHeight || 0;
+  if (!old) host.innerHTML = '';
   const card = el('article', 'xjc-result');
   card.dataset.stdout = pending ? 'stdout · writing…' : `stdout · ${fmtTime(result.createdAt)} · ${charCount(result)} chars`;
   const hd = el('div', 'xjc-result-hd');
@@ -471,7 +476,7 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
   const wrap = el('div', 'xjc-frame-wrap');
   card.append(hd, statusEl, wrap);
   const segs = pending && !(result.segments || []).length ? [] : segmentsOf(result);
-  const frame = mountFrame(wrap, segs, { onAction: pending ? null : text => continueFrom(result, text) });
+  const frame = mountFrame(wrap, segs, { height: oldH, onAction: pending ? null : text => continueFrom(result, text) });
   if (!pending) {
     const meta = el('div', 'xjc-meta');
     meta.append(el('span', '', `${result.characterName ? result.characterName + ' · ' : ''}${fmtTime(result.createdAt)}`), el('span', '', `${charCount(result)} 字 · ${result.comboCopy?.channel === 'preset' ? '走酒馆预设' : contextLabel(snap.context || result.comboCopy?.context)}${result.model ? ' · ' + result.model : ''}`));
@@ -495,6 +500,18 @@ function showResult(result, { pending = false, status = '', onRetry } = {}) {
       b.appendChild(el('pre', 'xjc-pre', result.raw || ''));
     }), 'xjc-btn ghost icon'));
     card.appendChild(ops);
+  }
+  if (old) {
+    card.classList.add('xjc-swap-in');
+    let done = false;
+    const swap = () => {
+      if (done || !card.isConnected) return;
+      done = true;
+      [...host.children].forEach(c => c !== card && c.remove());
+      card.classList.remove('xjc-swap-in');
+    };
+    frame.iframe.addEventListener('load', () => requestAnimationFrame(swap), { once: true });
+    setTimeout(swap, 1500);
   }
   host.appendChild(card);
   current = { result, frame, card, statusEl };

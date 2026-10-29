@@ -240,16 +240,20 @@ html[data-t=candy] .xjc-text p:first-child::first-line{color:var(--xjc-acc);font
 html[data-t=xuan] .xjc-text p{text-indent:2em}
 html[data-motion=off] *{animation:none!important;transition:none!important}
 </style><style id="xjc-user">${userCss}</style></head><body><div id="xjc-content">${body}</div>
-<${script}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
+<${script}>(function(){var id=${JSON.stringify(id)};var content=document.getElementById("xjc-content");
+function same(a,b){return a.nodeType===b.nodeType&&(a.nodeType!==1||a.tagName===b.tagName)}
+function attrs(a,b){var i,n;for(i=a.attributes.length-1;i>=0;i--){n=a.attributes[i].name;if(!b.hasAttribute(n))a.removeAttribute(n)}for(i=0;i<b.attributes.length;i++){n=b.attributes[i];if(a.getAttribute(n.name)!==n.value)a.setAttribute(n.name,n.value)}}
+function morph(a,b){var x=a.firstChild,y=b.firstChild,nx;while(y){nx=y.nextSibling;if(!x){a.appendChild(y)}else if(same(x,y)){if(x.nodeType!==1){if(x.nodeValue!==y.nodeValue)x.nodeValue=y.nodeValue}else{attrs(x,y);if(x.tagName==="STYLE"){if(x.textContent!==y.textContent)x.textContent=y.textContent}else morph(x,y)}x=x.nextSibling}else{a.replaceChild(y,x);x=y.nextSibling}y=nx}while(x){nx=x.nextSibling;a.removeChild(x);x=nx}}
+function patch(html){var t=document.createElement("template");t.innerHTML=html;var s=t.content.querySelectorAll("script");for(var i=0;i<s.length;i++)s[i].remove();morph(content,t.content)}function h(){return Math.max(content.scrollHeight,content.getBoundingClientRect().height)}var last=0;function send(){var v=h();if(Math.abs(v-last)>1){last=v;parent.postMessage({source:"xjc-frame",type:"resize",id:id,height:v},"*")}}
 if(window.ResizeObserver){new ResizeObserver(send).observe(content)}window.addEventListener("load",send);setInterval(send,700);send();
-window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));if(d.motion===false)r.setAttribute("data-motion","off");else r.removeAttribute("data-motion");var u=document.getElementById("xjc-user");if(u&&typeof d.css==="string")u.textContent=d.css;send()}if(d.type==="text"&&typeof d.html==="string"){content.innerHTML=d.html;send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="xjc-parent"||d.id!==id)return;if(d.type==="reading"){document.body.style.fontSize=d.size+"px";document.body.style.lineHeight=d.lineHeight;send()}if(d.type==="theme"&&d.vars){var r=document.documentElement;Object.keys(d.vars).forEach(function(k){r.style.setProperty(k,String(d.vars[k]))});r.setAttribute("data-t",String(d.theme||""));if(d.motion===false)r.setAttribute("data-motion","off");else r.removeAttribute("data-motion");var u=document.getElementById("xjc-user");if(u&&typeof d.css==="string")u.textContent=d.css;send()}if(d.type==="text"&&typeof d.html==="string"){patch(d.html);send()}if(d.type==="fill"&&d.slots){Object.keys(d.slots).forEach(function(k){var t=String(d.slots[k]).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]}).replace(/&lt;br\\s*\\/?&gt;/gi,"<br>").replace(/\\n/g,"<br>");document.querySelectorAll('[data-slot="'+k+'"]').forEach(function(n){n.innerHTML=t})});send()}});
 var XJC_ID=id;${SNAP_SCRIPT}
 document.addEventListener("click",function(e){var sp=e.target&&e.target.closest?e.target.closest(".xjc-spoiler"):null;if(sp){sp.classList.toggle("on");return}var a=e.target&&e.target.closest?e.target.closest("[data-action]"):null;if(a){parent.postMessage({source:"xjc-frame",type:"action",id:id,text:a.getAttribute("data-action")||a.textContent||""},"*")}});})();</${script}>
 </body></html>`;
 }
 
 /**
- * 挂一个 iframe。opts: { fill: 是否铺满容器（全屏），onAction(text) }
+ * 挂一个 iframe。opts: { fill: 是否铺满容器（全屏），height: 一开始的高度，onAction(text) }
  * 返回 handle：{ iframe, stream(segments, writing), fillSlots(map), snapshot() → PNG Blob, destroy() }
  */
 export function mountFrame(container, segments, opts = {}) {
@@ -261,6 +265,7 @@ export function mountFrame(container, segments, opts = {}) {
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   iframe.title = '小剧场';
   if (opts.fill) iframe.classList.add('fill');
+  else if (opts.height > 0) iframe.style.height = `${opts.height}px`;
   iframe.srcdoc = frameDoc(segments, id, !!opts.fill);
   const entry = { iframe, onAction: opts.onAction, fill: !!opts.fill, snaps: new Map() };
   frames.set(id, entry);
@@ -269,7 +274,8 @@ export function mountFrame(container, segments, opts = {}) {
   return {
     iframe,
     // 边写边显示：文字段按 Markdown 画，HTML 段原样放进去、末尾没写完的标签先截掉。
-    // 用 innerHTML 放进去的 <script> 不会运行，写完以后整篇重新渲染，脚本和交互那时才生效
+    // iframe 里只改有变化的节点（已经画好的图片、样式、动画不重来，不会一闪一闪）；
+    // 过程中 <script> 去掉不跑，写完以后整篇重新渲染，脚本和交互那时才生效
     stream(segs, writing) {
       post({ type: 'text', html: segs.map((s, i) => (s.type === 'html'
         ? `<div class="xjc-html">${s.content.replace(/<[^>]*$/, '')}</div>`

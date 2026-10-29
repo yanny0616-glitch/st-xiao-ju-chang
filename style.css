@@ -173,6 +173,8 @@
 .xjc-status[hidden] { display: none; }
 .xjc-spin { width: 12px; height: 12px; border: 2px solid var(--xjc-ui-line); border-top-color: var(--xjc-ui-acc); border-radius: 50%; animation: xjc-spin .8s linear infinite; flex: none; }
 @keyframes xjc-spin { to { transform: rotate(360deg); } }
+.xjc-stage-result { position: relative; }
+.xjc-stage-result > .xjc-swap-in { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; pointer-events: none; }
 .xjc-frame { display: block; width: 100%; border: 0; height: 120px; background: transparent; color-scheme: normal; }
 .xjc-frame.fill { height: 100%; }
 .xjc-meta { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 8px 12px 0; font-size: .75em; opacity: .55; }
