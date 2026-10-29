@@ -564,9 +564,17 @@ function followSheet(result) {
   });
 }
 
-function streamSegments(text) {
-  const body = text.replace(/^\s*(?:标题|题目|Title)\s*[:：].*\n?/, '').replace(/<\/?[a-zA-Z][\w-]*>/g, '');
-  return body.trim() ? [{ type: 'text', content: body }] : [];
+/** 写到一半的内容按写完以后的拆法分段（文字 / HTML / 混排）；还没收尾的 ```html 先当它收尾了 */
+function streamSegments(text, combo) {
+  // 最后一行是还没写完的 ``` / ```htm 这类围栏行，先不显示
+  // 结尾写了一半的标签（<di）也先不显示
+  text = text.replace(/(^|\n)[ \t]*`{1,3}[A-Za-z]*[ \t]*$/, '').replace(/<[^>\n]*$/, '');
+  const open = (text.match(/```/g) || []).length % 2;
+  const segs = postProcess(open ? `${text}\n\`\`\`` : text, combo).segments;
+  // 还没收尾的围栏里刚写了几个字，认不出是 HTML，先按 HTML 放（纯文字的小剧场除外）
+  const last = segs[segs.length - 1];
+  if (open && last?.type === 'text' && (combo.output || {}).mode !== 'text' && /^\s*</.test(last.content)) last.type = 'html';
+  return segs;
 }
 
 export async function run(combo, extra = '', more = {}) {
@@ -602,9 +610,7 @@ export async function run(combo, extra = '', more = {}) {
     const paint = () => {
       lastPaint = Date.now();
       if (info.kind === 'fill') current?.frame.fillSlots(info.fill);
-      else if (info.kind === 'text' && !/<[a-zA-Z][\w-]*[\s>]/.test(info.text.replace(/<\/?[a-zA-Z][\w-]*>/g, '').slice(0, 400))) {
-        current?.frame.stream(streamSegments(info.text), true);
-      }
+      else current?.frame.stream(streamSegments(info.text, combo), true);
       tick();
     };
     clearTimeout(pendingPaint);
@@ -1436,7 +1442,7 @@ function editCombo(row, draft = null) {
 
     body.appendChild(el('div', 'xjc-sec', '输出'));
     const stagedV = typeof d.output.staged === 'boolean' ? (d.output.staged ? 'on' : 'off') : '';
-    const stagedT = field('分两步出', seg([{ v: '', l: follow(globalStaged() ? '分两步' : '一次出') }, { v: 'on', l: '分两步' }, { v: 'off', l: '一次出' }], stagedV, v => { d.output.staged = v === '' ? null : v === 'on'; }), '先出页面骨架立刻显示，再按占位填字，适合大页面。');
+    const stagedT = field('分两步出', seg([{ v: '', l: follow(globalStaged() ? '分两步' : '一次出') }, { v: 'on', l: '分两步' }, { v: 'off', l: '一次出' }], stagedV, v => { d.output.staged = v === '' ? null : v === 'on'; }), '一次出也是边写边显示。分两步是先出页面骨架、再按占位填字，多一次请求，只适合特别长、一次容易写到一半被截断的页面。');
     let syncHtml = () => {};
     body.appendChild(field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], d.output.mode, v => { d.output.mode = v; syncHtml(); })));
     body.appendChild(stagedT);

@@ -268,8 +268,12 @@ export function mountFrame(container, segments, opts = {}) {
   const post = msg => { try { iframe.contentWindow?.postMessage({ source: 'xjc-parent', id, ...msg }, '*'); } catch { /* ignore */ } };
   return {
     iframe,
+    // 边写边显示：文字段按 Markdown 画，HTML 段原样放进去、末尾没写完的标签先截掉。
+    // 用 innerHTML 放进去的 <script> 不会运行，写完以后整篇重新渲染，脚本和交互那时才生效
     stream(segs, writing) {
-      post({ type: 'text', html: segs.map(s => `<article class="xjc-text${writing ? ' writing' : ''}">${textToHtml(s.content)}</article>`).join('\n') });
+      post({ type: 'text', html: segs.map((s, i) => (s.type === 'html'
+        ? `<div class="xjc-html">${s.content.replace(/<[^>]*$/, '')}</div>`
+        : `<article class="xjc-text${writing && i === segs.length - 1 ? ' writing' : ''}">${textToHtml(s.content)}</article>`)).join('\n') });
     },
     fillSlots(map) { post({ type: 'fill', slots: map }); },
     setAction(fn) { entry.onAction = fn; },
