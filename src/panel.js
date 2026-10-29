@@ -169,10 +169,11 @@ function tempCombo() {
     ...newCombo(), id: '', temp: true, name: ps.length === 1 ? ps[0].title : `${ps[0].title} 等 ${ps.length} 条`,
     preambleId: byId(state.preambles, state.settings.stagePreambleId) ? state.settings.stagePreambleId : newCombo().preambleId,
     parts: [{ ...newPart(ps.map(p => `p:${p.id}`)), id: 'pt_temp' }],
-    output: { ...newCombo().output, mode: ['text', 'html', 'mixed'].includes(state.settings.stageOutMode) ? state.settings.stageOutMode : 'mixed' },
+    output: { ...newCombo().output, mode: ['text', 'html', 'mixed'].includes(state.settings.stageOutMode) ? state.settings.stageOutMode : 'mixed', spec: state.settings.stageSpecId || '' },
   };
 }
-function currentCombo() {
+/** 舞台上当前的小剧场（「直接用提示词」时是临时拼的那个）；聊天楼层「跟舞台一样」也用它 */
+export function currentCombo() {
   if (state.settings.currentComboId === TEMP) { const t = tempCombo(); if (t) return t; }
   return byId(state.combos, state.settings.currentComboId) || state.combos[0] || null;
 }
@@ -310,14 +311,18 @@ function pickCombo() {
     search.style.marginTop = '10px';
     search.oninput = () => { q = search.value.trim().toLowerCase(); draw(); };
     body.appendChild(search);
-    const hint = el('p', 'xjc-hint', '点选一条或几条，按顺序拼在一起生成；前置要求和形式在下面选，其他都跟随全局。觉得好用可以在舞台上「存成小剧场」。');
+    const hint = el('p', 'xjc-hint', '点选一条或几条，按顺序拼在一起生成；前置要求、形式和 HTML 规范在下面选，其他都跟随全局。觉得好用可以在舞台上「存成小剧场」。');
     body.appendChild(hint);
     const preSel = select(state.preambles.map(p => ({ v: p.id, l: p.name })), byId(state.preambles, state.settings.stagePreambleId) ? state.settings.stagePreambleId : (state.settings.defaultPreambleId || state.preambles[0]?.id || ''));
     const preF = field('前置要求', preSel);
     body.appendChild(preF);
     let outMode = ['text', 'html', 'mixed'].includes(state.settings.stageOutMode) ? state.settings.stageOutMode : 'mixed';
-    const outF = field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], outMode, v => { outMode = v; }));
+    const outF = field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], outMode, v => { outMode = v; specF.hidden = v === 'text'; }));
     body.appendChild(outF);
+    const stageSpec = state.settings.stageSpecId;
+    const specSel = select([{ v: '', l: `跟随全局（${specLabel(globalSpec())}）` }, ...state.specs.map(p => ({ v: p.id, l: p.name })), { v: 'none', l: '不带' }], stageSpec === 'none' || byId(state.specs, stageSpec) ? stageSpec : '');
+    const specF = field('HTML 规范', specSel);
+    body.appendChild(specF);
     const chips = el('div', 'xjc-chips');
     chips.style.margin = '10px 0 4px';
     body.appendChild(chips);
@@ -326,7 +331,7 @@ function pickCombo() {
     body.appendChild(list);
     const useBtn = btn('用选中的提示词', () => {
       if (!picked.size) { toast('先点选至少一条提示词'); return; }
-      setSetting({ currentComboId: TEMP, stagePromptIds: [...picked], stagePreambleId: preSel.value, stageOutMode: outMode }); closeIt(); renderPick();
+      setSetting({ currentComboId: TEMP, stagePromptIds: [...picked], stagePreambleId: preSel.value, stageOutMode: outMode, stageSpecId: specSel.value }); closeIt(); renderPick();
     }, 'xjc-btn pri');
     const newBtn = btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn');
     foot.append(newBtn, useBtn);
@@ -337,6 +342,7 @@ function pickCombo() {
       tags = allTags(mode === 'combos' ? state.combos : state.prompts);
       chips.hidden = false;
       hint.hidden = preF.hidden = outF.hidden = mode !== 'prompts';
+      specF.hidden = mode !== 'prompts' || outMode === 'text';
       search.hidden = (mode === 'combos' ? state.combos : state.prompts).length <= 6;
       newBtn.hidden = mode !== 'combos';
       useBtn.hidden = mode !== 'prompts';
@@ -1895,7 +1901,15 @@ function setChat(box) {
   box.appendChild(toggle('消息的「…」菜单里加面具按钮（点一下为这条出一篇）', t.button, v => { put({ button: v }); document.dispatchEvent(new CustomEvent('xjc-settings')); askT.hidden = !v; }));
   box.appendChild(askT);
   askT.hidden = !t.button;
-  // 自动出关着时，概率和出哪种都用不到，收起来
+  // 面具按钮和自动出都按「出哪种」选小剧场，所以放在外面
+  const comboSel = select(state.combos.map(c => ({ v: c.id, l: c.name })), t.comboId || state.combos[0]?.id);
+  comboSel.onchange = () => put({ comboId: comboSel.value });
+  const cf = field('用这个小剧场', comboSel);
+  box.appendChild(field('出哪种', seg([{ v: 'random', l: '按权重随机' }, { v: 'ai', l: 'AI 自选' }, { v: 'combo', l: '固定一个' }, { v: 'stage', l: '跟舞台一样' }], t.pick, v => { put({ pick: v, comboId: comboSel.value }); cf.hidden = v !== 'combo'; }),
+    '面具按钮和自动出都按这个选小剧场。跟舞台一样：用舞台上当前的那个（包括「直接用提示词」临时拼的）。'));
+  box.appendChild(cf);
+  cf.hidden = t.pick !== 'combo';
+  // 自动出关着时，概率用不到，收起来
   const autoBox = el('div');
   box.appendChild(toggle('AI 回复后自动出一篇', t.auto, v => { put({ auto: v }); autoBox.hidden = !v; }));
   box.appendChild(autoBox);
@@ -1904,12 +1918,6 @@ function setChat(box) {
   chance.onchange = () => put({ chance: Math.max(1, Math.min(100, Number(chance.value) || 30)) });
   autoBox.appendChild(field('自动出的概率（%）', chance, '100 = 每条回复都出。'));
   autoBox.appendChild(toggle('换一个回复（swipe）、重新生成时也自动出', t.autoOnSwipe, v => put({ autoOnSwipe: v })));
-  const comboSel = select(state.combos.map(c => ({ v: c.id, l: c.name })), t.comboId || state.combos[0]?.id);
-  comboSel.onchange = () => put({ comboId: comboSel.value });
-  const cf = field('用这个小剧场', comboSel);
-  autoBox.appendChild(field('出哪种', seg([{ v: 'random', l: '按权重随机' }, { v: 'ai', l: 'AI 自选' }, { v: 'combo', l: '固定一个' }], t.pick, v => { put({ pick: v, comboId: comboSel.value }); cf.hidden = v !== 'combo'; })));
-  autoBox.appendChild(cf);
-  cf.hidden = t.pick !== 'combo';
   box.appendChild(toggle('默认展开', t.expanded, v => put({ expanded: v })));
 }
 

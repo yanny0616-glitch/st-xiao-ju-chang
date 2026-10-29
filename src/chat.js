@@ -9,6 +9,7 @@ import { currentChar } from './host.js';
 import { instr } from './instr.js';
 import { currentFold } from './fold.js';
 import { notifyDone } from './notify.js';
+import { currentCombo } from './panel.js';
 import { isFavorite, toggleFavorite, ownTheaters, pruneForeign } from './favs.js';
 
 const running = new Map(); // message 对象 → { ctrl }
@@ -56,6 +57,7 @@ function pickCombo() {
   const t = state.settings.tail;
   if (t.pick === 'ai') return aiPickCombo();
   if (t.pick === 'combo') return byId(state.combos, t.comboId) || weightedRandomCombo();
+  if (t.pick === 'stage') return currentCombo() || weightedRandomCombo();
   return weightedRandomCombo();
 }
 export async function generateFor(mesId, { combo, extra, follow } = {}) {
