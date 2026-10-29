@@ -79,6 +79,9 @@ export function openSheet(title, build, onClose) {
   const host = sheetHost || document.body;
   const mask = el('div', 'xjc-sheet-mask');
   const box = el('div', 'xjc-sheet');
+  // 一层叠一层：后开的抽屉连遮罩一起盖在前面的抽屉上（样式里遮罩 5、抽屉 6）
+  mask.style.zIndex = String(5 + sheets.length * 2);
+  box.style.zIndex = String(6 + sheets.length * 2);
   const hd = el('div', 'xjc-sheet-hd');
   hd.appendChild(el('h3', '', title));
   const body = el('div', 'xjc-sheet-bd');
