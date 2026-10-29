@@ -18,6 +18,7 @@ export function captureCombo(combo) {
   if (!copy._dependencies) {
     copy._dependencies = clone({
       preamble: byId(state.preambles, combo.preambleId) || state.preambles[0] || null,
+      spec: byId(state.specs, copy.output?.spec) || null,
       // 每段存下当时能用的提示词；带随机的段重放时从这里重新抽
       parts: partsOf(combo).map(pt => ({ name: pt.name || '', pick: Number(pt.pick) || 0, pool: partPool(pt) })),
       randoms: state.randoms, macros: state.macros,
@@ -46,6 +47,12 @@ function drawParts(combo, forcedIds = []) {
     const own = pt.pool.filter(p => forced.has(p.id));
     return { ...pt, used: own.length ? own : shuffle(pt.pool).slice(0, pt.pick), random: true, forced: own.length > 0 };
   });
+}
+/** 这个小剧场用的 HTML 规范（没有 = 不带）。更新前的收藏没存，按现在的设置来 */
+function comboSpec(combo) {
+  const deps = combo._dependencies;
+  if (deps && 'spec' in deps) return deps.spec;
+  return byId(state.specs, combo.output?.spec) || null;
 }
 function comboPreamble(combo) {
   return combo._dependencies ? combo._dependencies.preamble : byId(state.preambles, combo.preambleId) || state.preambles[0];
@@ -116,9 +123,12 @@ function buildTasks(combo, extra, charName, phase = null) {
   if (extra) lines.push(`【本次追加】${expand(extra, mctx)}`);
   const out = [];
   const kind = phase && phase.kind;
+  // 第二步只填字，用不到；纯文字也用不到
+  const spec = kind === 'shell' || (kind !== 'fill' && o.mode !== 'text') ? comboSpec(combo) : null;
+  if (spec?.content?.trim()) lines.push(`【HTML 规范】${expand(spec.content, mctx)}`);
   const titleLine = instr('title');
   if (kind === 'shell') {
-    out.push(instr('shell') + ' ' + instr('htmlRules'));
+    out.push(instr('shell'));
     if (styleHint(o.style)) out.push(styleHint(o.style));
     out.push(titleLine);
   } else if (kind === 'fill') {
@@ -127,8 +137,8 @@ function buildTasks(combo, extra, charName, phase = null) {
     out.push(instr('fill'));
     if (len) out.push(instr('fillLength', { 字数: len.chars }));
   } else {
-    if (o.mode === 'html') out.push(instr('outHtml') + (prompts.some(p => (p.tags || []).includes('前端')) ? '' : ' ' + instr('htmlRules')));
-    else if (o.mode === 'mixed') out.push(instr('outMixed') + ' ' + instr('htmlRules'));
+    if (o.mode === 'html') out.push(instr('outHtml'));
+    else if (o.mode === 'mixed') out.push(instr('outMixed'));
     else out.push(instr('outText'));
     if (len) out.push(instr('length', { 字数: len.chars }));
     if (o.wrapTag) out.push(instr('wrap', { 标签: o.wrapTag }));
@@ -141,7 +151,7 @@ function buildTasks(combo, extra, charName, phase = null) {
   return {
     tasks: lines.join('\n'), randoms, parts,
     snapshot: {
-      comboId: combo.id || '', comboName: combo.name, preambleName: (comboPreamble(combo) || {}).name || '',
+      comboId: combo.id || '', comboName: combo.name, preambleName: (comboPreamble(combo) || {}).name || '', specName: spec?.name || '',
       prompts: prompts.map(p => p.title), randoms: randoms.map(r => r.title), randomsForced: forcedR.length > 0 || parts.some(pt => pt.forced),
       parts: parts.filter(pt => pt.random).map(pt => ({ name: pt.name, of: pt.pool.length, used: pt.used.map(p => p.title) })),
       // 随机抽到的（段里的和随机池的）；「接着写 / 追问」时沿用

@@ -1,12 +1,10 @@
 // 内置指令：<Brief> 里插件自己加的那些话（输出格式、身份、标题、篇幅…）。都能在「设置 → 生成 → 内置指令」里改，改过的存在 settings.instr
 import { state } from './store.js';
-import { MOBILE_HTML_RULES } from './defaults.js';
 
 export const INSTR = [
   { group: '输出形式', key: 'outText', label: '纯文字', text: '只输出纯文字正文，不要 HTML、不要 markdown 标题、不要代码块。' },
   { group: '输出形式', key: 'outHtml', label: 'HTML', text: '整体输出为一段 HTML（不要 markdown 围栏、不要任何 HTML 之外的说明文字）。' },
   { group: '输出形式', key: 'outMixed', label: '混排', text: '允许 HTML 与纯文字混排：HTML 部分用 ```html 围栏包裹，文字部分直接写；两者之间空一行。' },
-  { group: '输出形式', key: 'htmlRules', label: 'HTML 规则（HTML、混排、分两步的第一步都会带）', text: MOBILE_HTML_RULES, note: '提示词带「前端」标签时，纯 HTML 小剧场不带这条（交给那条提示词自己规定）。' },
   { group: '输出形式', key: 'styleVars', label: 'HTML 风格 · 给主题变量', text: '样式提示：页面外层已定义 CSS 变量 --xjc-bg（底色）--xjc-ink（文字）--xjc-acc（强调色）--xjc-line（细线）--xjc-font（字体），优先使用它们，让画面和小剧场当前的主题协调；其余自由发挥。' },
   { group: '输出形式', key: 'styleStrict', label: 'HTML 风格 · 严格只用主题色', text: '样式约束：颜色只能使用 CSS 变量 --xjc-bg --xjc-ink --xjc-acc --xjc-line（可用 color-mix 或透明度派生），字体只用 --xjc-font；不得自带其他颜色值。' },
   { group: '输出形式', key: 'length', label: '篇幅', text: '篇幅约 {字数} 字（HTML 里只算可见文字）。', vars: ['字数'] },

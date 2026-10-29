@@ -1,5 +1,6 @@
 // 「跟随全局」：小剧场里这几项留空（null / ''）就用「设置 → 生成」里的全局值，选了才是自定
 import { state, save } from './store.js';
+import { byId } from './util.js';
 
 export const WHO_LABEL = { persona: '我的人设', custom: '自定身份', none: '旁观' };
 export const CHANNEL_LABEL = { own: '插件自己拼', preset: '走酒馆预设' };
@@ -13,6 +14,9 @@ export const globalWho = () => (WHO_LABEL[state.settings.defaultWho] ? state.set
 export const globalChannel = () => (state.settings.defaultChannel === 'preset' ? 'preset' : 'own');
 export const globalStyle = () => (STYLE_LABEL[state.settings.defaultStyle] ? state.settings.defaultStyle : 'free');
 export const globalStaged = () => !!state.settings.stagedDefault;
+/** 全局的 HTML 规范：库里某条的 id，或 'none' = 不带；默认那条被删了就用第一条 */
+export const globalSpec = () => { const id = state.settings.defaultSpecId; return id === 'none' ? 'none' : byId(state.specs, id) ? id : (state.specs[0]?.id || 'none'); };
+export const specLabel = id => (id === 'none' ? '不带' : byId(state.specs, id)?.name || '不带');
 export const globalWriteBack = () => !!state.settings.writeBackDefault;
 
 /** 把「跟随全局」的项换成具体值（幂等）；生成和快照都用这份 */
@@ -26,7 +30,7 @@ export function resolveCombo(c) {
     whoText: !WHO_LABEL[c.who] && globalWho() === 'custom' && !String(c.whoText || '').trim() ? (state.settings.defaultWhoText || '') : c.whoText,
     channel: CHANNEL_LABEL[c.channel] ? c.channel : globalChannel(),
     writeBack: typeof c.writeBack === 'boolean' ? c.writeBack : globalWriteBack(),
-    output: { ...o, style: STYLE_LABEL[o.style] ? o.style : globalStyle(), staged: typeof o.staged === 'boolean' ? o.staged : globalStaged() },
+    output: { ...o, style: STYLE_LABEL[o.style] ? o.style : globalStyle(), staged: typeof o.staged === 'boolean' ? o.staged : globalStaged(), spec: o.spec === 'none' || byId(state.specs, o.spec) ? o.spec : globalSpec() },
   };
 }
 

@@ -131,6 +131,7 @@ export function snapshotInfo(result) {
   for (const pt of s.parts || []) row(`${pt.name || '随机段'}（${pt.of} 条里抽）`, (pt.used || []).join('、'));
   row(s.randomsForced ? '随机（有指定的）' : '随机附加', (s.randoms || []).join('、'));
   row('输出', `${KIND_LABEL[kindOf(result)]} · 篇幅 ${s.length || '不限'}${s.staged ? ' · 分两步' : ''}`);
+  row('HTML 规范', s.specName);
   row('上下文', contextLabel(s.context));
   row('通道', result.channelNote);
   row('身份', s.who === 'custom' ? '自定身份' : s.who === 'none' ? '旁观' : '用户人设');

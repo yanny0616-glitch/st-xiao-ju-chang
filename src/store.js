@@ -1,18 +1,18 @@
 // 存储：TauriTavern 用宿主的扩展存储（data 目录里，随数据一起备份/同步）；
 // 原版酒馆把设置和库放进 extension_settings（存在服务器 settings.json）；收藏、最近（体积大）和 API 配置（含密钥，不放进常被分享的 settings.json）
 // 存成服务器上的用户文件（data/<用户>/user/files/xiao-ju-chang-*.json），换设备、换浏览器都跟着走。以前放在浏览器 IndexedDB / settings.json 里的，第一次读到时搬过去。
-import { ctx, isTT, clone, toast } from './util.js';
-import { DEFAULT_PREAMBLES, DEFAULT_PROMPTS, DEFAULT_RANDOMS, DEFAULT_MACROS, DEFAULT_COMBOS, DEFAULT_SETTINGS } from './defaults.js';
-import { migrateParts } from './parts.js';
+import { ctx, isTT, clone, toast, uid } from './util.js';
+import { LEGACY_HTML_RULES, DEFAULT_SPECS, DEFAULT_PREAMBLES, DEFAULT_PROMPTS, DEFAULT_RANDOMS, DEFAULT_MACROS, DEFAULT_COMBOS, DEFAULT_SETTINGS } from './defaults.js';
+import { migrateParts, partPool } from './parts.js';
 
 const NS = 'xiao-ju-chang';
 const ST_KEY = 'xiaoJuChang';
-export const LIBRARY = ['preambles', 'prompts', 'randoms', 'macros', 'combos', 'apis', 'themes'];
+export const LIBRARY = ['preambles', 'specs', 'prompts', 'randoms', 'macros', 'combos', 'apis', 'themes'];
 export const HEAVY = ['favorites', 'recent'];
 
 export const state = {
   settings: clone(DEFAULT_SETTINGS),
-  preambles: [], prompts: [], randoms: [], macros: [], combos: [], apis: [], themes: [],
+  preambles: [], specs: [], prompts: [], randoms: [], macros: [], combos: [], apis: [], themes: [],
   favorites: [], recent: [],
 };
 
@@ -152,6 +152,40 @@ export async function load() {
   }
   // 0.4.2 起提示词按「段」排；旧的 promptIds 换过来
   if (migrateParts(state.combos)) await save('combos');
+  if (!state.settings.specsMigrated) {
+    migrateSpecs();
+    state.settings.specsMigrated = true;
+    await saveAll();
+  }
+}
+
+/**
+ * 0.5.2 起 HTML 规范是库里的一类，不再是内置指令：
+ * 改过的内置「HTML 规则」变成库里一条并设为默认；自带提示词末尾抄的那份规则去掉（改由默认规范带上）；
+ * 以前靠「前端」标签不带内置规则的 HTML 小剧场改成「不带」，发出去的和以前一样
+ */
+function migrateSpecs() {
+  const now = new Date().toISOString();
+  if (!state.specs.length) state.specs.push(...clone(DEFAULT_SPECS).map(x => ({ ...x, createdAt: now })));
+  const old = LEGACY_HTML_RULES;
+  const edited = state.settings.instr?.htmlRules;
+  if (typeof edited === 'string' && edited.trim() && edited !== old) {
+    const id = uid('spec');
+    state.specs.push({ id, name: '我改过的 HTML 规则', content: edited.replace(/^HTML 规则[:：]\s*/, ''), createdAt: now });
+    state.settings.defaultSpecId = id;
+  }
+  if (state.settings.instr) delete state.settings.instr.htmlRules;
+  const stripped = new Set();
+  for (const p of state.prompts) {
+    if (typeof p.content !== 'string' || !p.content.includes(old)) continue;
+    p.content = p.content.replace(`\n${old}`, '').replace(old, '').trim();
+    stripped.add(p.id);
+  }
+  for (const c of state.combos) {
+    if (c.output?.mode !== 'html' || c.output.spec) continue;
+    const own = (c.parts || []).flatMap(pt => partPool(pt)).some(p => (p.tags || []).includes('前端') && !stripped.has(p.id));
+    if (own) c.output.spec = 'none';
+  }
 }
 
 export function save(name) {
@@ -180,6 +214,7 @@ export function seedDefaults(force) {
   };
   let n = 0;
   n += add('preambles', DEFAULT_PREAMBLES, 'name');
+  n += add('specs', DEFAULT_SPECS, 'name');
   n += add('prompts', DEFAULT_PROMPTS, 'title');
   n += add('randoms', DEFAULT_RANDOMS, 'title');
   n += add('macros', DEFAULT_MACROS, 'name');

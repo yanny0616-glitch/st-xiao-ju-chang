@@ -9,7 +9,7 @@ import {
 } from './gen.js';
 import { INSTR, instrDefault, instrEdited } from './instr.js';
 import { FOLDS, foldCss, currentFold, customFoldCss, applyFold } from './fold.js';
-import { resolveCombo, globalContext, globalWho, globalChannel, globalStyle, globalStaged, globalWriteBack, WHO_LABEL, CHANNEL_LABEL, STYLE_LABEL } from './follow.js';
+import { resolveCombo, globalContext, globalWho, globalChannel, globalStyle, globalStaged, globalWriteBack, globalSpec, specLabel, WHO_LABEL, CHANNEL_LABEL, STYLE_LABEL } from './follow.js';
 import { mountFrame, updateReading, applyTheme, themeName, markTheme, activeCustom, BUILTIN_THEMES, CANVAS_LABEL } from './frame.js';
 import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
@@ -631,13 +631,18 @@ export async function run(combo, extra = '', more = {}) {
 
 // ── 库 ──
 const LIB_TABS = [
-  { v: 'combos', l: '小剧场' }, { v: 'prompts', l: '提示词' }, { v: 'randoms', l: '随机池' }, { v: 'preambles', l: '前置' },
+  { v: 'combos', l: '小剧场' }, { v: 'prompts', l: '提示词' }, { v: 'randoms', l: '随机池' }, { v: 'preambles', l: '前置' }, { v: 'specs', l: 'HTML' },
 ];
 function renderLibrary() {
   const v = views.library;
   v.innerHTML = '';
-  const counts = { combos: state.combos.length, prompts: state.prompts.length, randoms: state.randoms.length + state.macros.length, preambles: state.preambles.length };
-  v.appendChild(seg(LIB_TABS.map(t => ({ v: t.v, l: `${t.l} ${counts[t.v]}` })), libTab, x => { libTab = x; renderLibrary(); }));
+  const counts = { combos: state.combos.length, prompts: state.prompts.length, randoms: state.randoms.length + state.macros.length, preambles: state.preambles.length, specs: state.specs.length };
+  const tabs = seg(LIB_TABS.map(t => ({ v: t.v, l: `${t.l} ${counts[t.v]}` })), libTab, x => { libTab = x; renderLibrary(); });
+  tabs.classList.add('xjc-lib-tabs');
+  v.appendChild(tabs);
+  // 手机上标签横着滑：重画后把选中的那个滑到看得见的地方
+  const on = tabs.querySelector('button.on');
+  if (on && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft += on.getBoundingClientRect().right - tabs.getBoundingClientRect().right + 8;
   const box = el('div');
   box.style.marginTop = '12px';
   v.appendChild(box);
@@ -645,6 +650,7 @@ function renderLibrary() {
   if (libTab === 'prompts') libPrompts(box);
   if (libTab === 'randoms') libRandoms(box);
   if (libTab === 'preambles') libPreambles(box);
+  if (libTab === 'specs') libSpecs(box);
 }
 function itemRow(title, desc, onClick, end) {
   const item = el('div', 'xjc-item');
@@ -903,6 +909,19 @@ function libPreambles(box) {
   box.appendChild(el('p', 'xjc-hint', '发给模型的顺序：① 材料（角色卡、用户人设、世界书、总结、最近聊天，按小剧场的设置取）② 前置要求 ③ <Brief>（提示词、随机、输出要求）。酒馆预设里的破限、文风、正文格式条目都不会带进来；需要的话写进前置要求。'));
 }
 
+function libSpecs(box) {
+  const row = el('div', 'xjc-row');
+  row.appendChild(btn('＋ 新增 HTML 规范', () => editText('specs', null), 'xjc-btn pri'));
+  box.appendChild(row);
+  const list = el('div', 'xjc-list');
+  list.style.marginTop = '12px';
+  const def = globalSpec();
+  if (!state.specs.length) list.appendChild(el('div', 'xjc-empty', '还没有 HTML 规范，HTML 小剧场只按提示词写。'));
+  for (const p of state.specs) { const used = state.combos.filter(c => c.output?.spec === p.id).length; list.appendChild(itemRow(p.name, p.content.replace(/\s+/g, ' ').slice(0, 70), () => editText('specs', p), [p.id === def ? '默认' : '', used ? `${used} 个小剧场指定用它` : ''].filter(Boolean).join(' · '))); }
+  box.appendChild(list);
+  box.appendChild(el('p', 'xjc-hint', 'HTML 怎么写的规定：布局、尺寸、字号、能不能引外部资源……小剧场输出是 HTML 或混排时（分两步的骨架也算），选中的那条放进 <Brief> 的【HTML 规范】。每个小剧场在「编辑 → 输出 → HTML 规范」选用哪条或不带，默认跟随「设置 → 生成」。纯文字的小剧场不带。'));
+}
+
 /** 内置指令：每条一个输入框，改过的标「已改」、能单独恢复默认；保存时和默认一样的就当没改 */
 function editInstr() {
   openSheet('内置指令', (body, foot, closeIt) => {
@@ -943,10 +962,12 @@ function editInstr() {
   });
 }
 
-/** 提示词 / 随机条目 / 前置要求 共用一个编辑框 */
+/** 提示词 / 随机条目 / 前置要求 / HTML 规范 共用一个编辑框 */
 function editText(kind, row) {
-  const isPre = kind === 'preambles';
-  const label = { prompts: '提示词', randoms: '随机条目', preambles: '前置要求' }[kind];
+  const isSpec = kind === 'specs';
+  // 前置要求和 HTML 规范只有名字和内容
+  const isPre = kind === 'preambles' || isSpec;
+  const label = { prompts: '提示词', randoms: '随机条目', preambles: '前置要求', specs: 'HTML 规范' }[kind];
   openSheet(row ? `编辑${label}` : `新增${label}`, (body, foot, closeIt) => {
     const t = input(isPre ? row?.name : row?.title, '标题');
     body.appendChild(field('标题', t));
@@ -958,21 +979,27 @@ function editText(kind, row) {
     // 分组可放可不放：下拉里选已有的，或者新建一个
     const grp = isPre ? null : groupInput(kind, row?.group);
     if (grp) body.appendChild(field('分组', grp, groupsOf(kind).length ? '' : '可以不放。放了库里就按组显示，编辑小剧场时也能整组选、从组里随机抽。'));
-    const c = textarea(row?.content, isPre ? 12 : 8, isPre ? '整段 system 框架' : '可以用 {{user}} {{char}} {{篇幅}} {{随机词:世界}} 等宏');
+    const c = textarea(row?.content, isPre ? 12 : 8, isSpec ? '布局、尺寸、字号、样式、能不能引外部资源……' : isPre ? '整段 system 框架' : '可以用 {{user}} {{char}} {{篇幅}} {{随机词:世界}} 等宏');
     body.appendChild(field('内容', c));
     let def = null;
-    if (isPre) { def = toggle('设为默认（AI 自选、新建小剧场用它）', row && row.id === state.settings.defaultPreambleId); body.appendChild(def); }
+    if (isSpec) { def = toggle('设为默认（小剧场跟随全局时用它）', row && row.id === globalSpec()); body.appendChild(def); }
+    else if (isPre) { def = toggle('设为默认（AI 自选、新建小剧场用它）', row && row.id === state.settings.defaultPreambleId); body.appendChild(def); }
     // 新写的提示词可以顺手建成一个小剧场；不建也行，舞台上「换一个 → 直接用提示词」就能用
     let asCombo = null;
     if (!row && kind === 'prompts') { asCombo = toggle('同时建成一个小剧场（只含这一条，其他跟随全局）', false); body.appendChild(asCombo); }
     if (row) {
       foot.appendChild(ibtn('fa-trash-can', '删除', async () => {
-        if (isPre && state.preambles.length <= 1) { toast('至少留一条前置要求'); return; }
-        const used = kind !== 'randoms' ? state.combos.filter(x => (isPre ? x.preambleId === row.id : usesPrompt(x, row.id))).map(x => x.name) : [];
-        const warn = isPre ? `「${used.join('、')}」在用它，删了之后它们改用第一条前置。确定删除？` : `「${used.join('、')}」在用它，删了这些小剧场里就少了这一条。确定删除？`;
+        if (kind === 'preambles' && state.preambles.length <= 1) { toast('至少留一条前置要求'); return; }
+        const used = kind !== 'randoms' ? state.combos.filter(x => (isSpec ? x.output?.spec === row.id : isPre ? x.preambleId === row.id : usesPrompt(x, row.id))).map(x => x.name) : [];
+        const warn = isSpec ? `「${used.join('、')}」指定用它，删了之后它们改成跟随全局。确定删除？` : isPre ? `「${used.join('、')}」在用它，删了之后它们改用第一条前置。确定删除？` : `「${used.join('、')}」在用它，删了这些小剧场里就少了这一条。确定删除？`;
         if (!(await confirmSheet('删除', used.length ? warn : '确定删除？', '删除', true))) return;
+        const wasDefault = isSpec && globalSpec() === row.id;
         await remove(kind, row.id);
-        if (used.length) {
+        if (wasDefault) setSetting({ defaultSpecId: state.specs[0]?.id || 'none' });
+        if (isSpec) {
+          for (const x of state.combos) if (x.output?.spec === row.id) x.output.spec = '';
+          if (used.length) save('combos');
+        } else if (used.length) {
           const fb = state.preambles[0]?.id || '';
           for (const x of state.combos) {
             if (isPre && x.preambleId === row.id) x.preambleId = fb;
@@ -987,9 +1014,10 @@ function editText(kind, row) {
     foot.appendChild(btn('保存', () => {
       const title = t.value.trim();
       if (!title) { toast('标题不能空'); return; }
-      const data = isPre ? { id: row?.id || uid('pre'), name: title, content: c.value } : { id: row?.id || uid(kind.slice(0, 3)), title, tags: textToTags(tg.value), group: grp.value.trim().slice(0, 30), content: c.value };
+      const data = isPre ? { id: row?.id || uid(isSpec ? 'spec' : 'pre'), name: title, content: c.value } : { id: row?.id || uid(kind.slice(0, 3)), title, tags: textToTags(tg.value), group: grp.value.trim().slice(0, 30), content: c.value };
       const saved = upsert(kind, data);
-      if (isPre && def.input.checked) setSetting({ defaultPreambleId: saved.id });
+      if (isSpec && def.input.checked) setSetting({ defaultSpecId: saved.id });
+      else if (isPre && def.input.checked) setSetting({ defaultPreambleId: saved.id });
       if (asCombo?.input.checked) combosFromPrompts([saved], { output: { mode: 'mixed' } }).then(() => toast('也建成了一个小剧场'));
       closeIt(); renderLibrary();
     }, 'xjc-btn pri'));
@@ -1028,7 +1056,7 @@ function newCombo() {
     id: '', name: '', tags: [], preambleId: s.defaultPreambleId || state.preambles[0]?.id || '', parts: [],
     random: { count: 0, include: [], exclude: [] },
     // 新建的小剧场全部「跟随全局」，想单独改再在编辑里选
-    output: { mode: 'text', wrapTag: '', length: 'default', customChars: 900, style: '', staged: null },
+    output: { mode: 'text', wrapTag: '', length: 'default', customChars: 900, style: '', staged: null, spec: '' },
     context: null, who: '', whoText: '', api: '', weight: 1, channel: '', writeBack: null,
   };
 }
@@ -1147,6 +1175,9 @@ function editCombo(row, draft = null) {
     let syncHtml = () => {};
     body.appendChild(field('形式', seg([{ v: 'text', l: '纯文字' }, { v: 'html', l: 'HTML' }, { v: 'mixed', l: '混排' }], d.output.mode, v => { d.output.mode = v; syncHtml(); })));
     body.appendChild(stagedT);
+    const specSel = select([{ v: '', l: `跟随全局（${specLabel(globalSpec())}）` }, ...state.specs.map(p => ({ v: p.id, l: p.name })), { v: 'none', l: '不带' }], d.output.spec === 'none' || byId(state.specs, d.output.spec) ? d.output.spec : '');
+    const specF = field('HTML 规范', specSel, '规定 HTML 怎么写，在「库 → HTML 规范」里管理。提示词自己写了一整套 HTML 要求的，选「不带」或者把那套存成一条规范来选，免得两套打架。');
+    body.appendChild(specF);
     const lenSel = select(['default', 'short', 'medium', 'long', 'custom'].map(k => ({ v: k, l: k === 'default' ? `跟随全局（${state.settings.lengthLimit ? LENGTH_LABEL[state.settings.defaultLength || 'medium'] : '不限'}）` : `${LENGTH_LABEL[k]}${k === 'custom' ? '' : ` · 约 ${{ short: 400, medium: 900, long: 1800 }[k]} 字`}` })), d.output.length);
     const customChars = input(d.output.customChars, '字数', 'number');
     const customF = field('自定字数', customChars);
@@ -1163,7 +1194,7 @@ function editCombo(row, draft = null) {
     g2.append(styleF, field('标签包裹', wrap));
     body.appendChild(g2);
     // 纯文字用不到 HTML 风格；分两步只对 HTML
-    syncHtml = () => { stagedT.hidden = d.output.mode !== 'html'; styleF.hidden = d.output.mode === 'text'; };
+    syncHtml = () => { stagedT.hidden = d.output.mode !== 'html'; styleF.hidden = specF.hidden = d.output.mode === 'text'; };
     syncHtml();
 
     body.appendChild(el('div', 'xjc-sec', '上下文'));
@@ -1219,7 +1250,7 @@ function editCombo(row, draft = null) {
       ...d, id: d.id || uid('c'), name: name.value.trim() || '未命名小剧场', tags: textToTags(tg.value), preambleId: pre.value,
       parts: d.parts.filter(pt => pt.items.length).map(pt => ({ id: pt.id || newPart().id, name: pt.name || '', items: [...pt.items], pick: Number(pt.pick) || 0 })),
       random: { count: Number(rc.value) || 0, include: [...(d.random.include || [])], exclude: [...(d.random.exclude || [])], groups: [...(d.random.groups || [])] },
-      output: { ...d.output, length: lenSel.value, customChars: Math.max(50, Number(customChars.value) || 900), style: styleSel.value, wrapTag: wrap.value.trim().replace(/[^\w-]/g, '') },
+      output: { ...d.output, length: lenSel.value, customChars: Math.max(50, Number(customChars.value) || 900), style: styleSel.value, spec: specSel.value, wrapTag: wrap.value.trim().replace(/[^\w-]/g, '') },
       context: d.context ? { ...ctxDraft, rounds: Math.max(1, Math.min(100, Number(rounds.value) || 12)), worldInfo: wi.input.checked, summary: sm.input.checked } : null,
       whoText: whoText.value.trim(), api: api.value, weight: Math.max(0, Number(weight.value) || 0),
       channel: d.channel || '', writeBack: d.writeBack ?? null,
@@ -1336,6 +1367,9 @@ function pickPrompts(selected, done) {
 }
 
 // ── 导入 ──
+const IMPORT_KINDS = [{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'specs', l: 'HTML 规范' }, { v: 'randoms', l: '随机条目' }];
+/** 提示词和随机条目有标签、分组；前置要求和 HTML 规范只有名字和内容 */
+const GROUPED = kind => kind === 'prompts' || kind === 'randoms';
 function importFlow() {
   openSheet('导入', (body, foot, closeIt) => {
     body.appendChild(el('p', 'xjc-hint', '① 粘贴文本：每条用一行「## 标题 #标签 #标签」开头，下面是内容，可以一次贴很多条。② 选文件：本插件导出的、Float 小剧场 APP 导出的直接进库；暗柜「夜间档案」每份变成两条提示词 + 一个小剧场；酒馆导出的世界书列出条目让你勾；其它 JSON（酒馆预设、角色卡、别人的生成器）会把里面像提示词的段落列出来让你挑。③ 从酒馆世界书选：直接挑酒馆里已有的世界书，不用先导出。'));
@@ -1343,14 +1377,14 @@ function importFlow() {
     body.appendChild(ta);
     let kind = 'prompts';
     const asCombo = toggle('每条同时建成一个小剧场（直接能在舞台上选）', false);
-    body.appendChild(field('文本导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; impGroupF.hidden = v === 'preambles'; impGroup.setKind(v); })));
+    body.appendChild(field('文本导成', seg(IMPORT_KINDS, kind, v => { kind = v; asCombo.hidden = v !== 'prompts'; impGroupF.hidden = !GROUPED(v); if (GROUPED(v)) impGroup.setKind(v); })));
     body.appendChild(asCombo);
     const impGroup = importGroupInput(kind);
     const impGroupF = field('放进分组', impGroup);
     body.appendChild(impGroupF);
     const importRows = async rows => {
-      const made = await addRows(kind, rows, kind === 'preambles' ? {} : { group: impGroup.value });
-      let msg = `导入 ${rows.length} 条${{ prompts: '提示词', preambles: '前置要求', randoms: '随机条目' }[kind]}`;
+      const made = await addRows(kind, rows, GROUPED(kind) ? { group: impGroup.value } : {});
+      let msg = `导入 ${rows.length} 条${IMPORT_KINDS.find(x => x.v === kind).l}`;
       if (kind === 'prompts' && asCombo.input.checked) { await combosFromPrompts(made); msg += `，建了 ${made.length} 个小剧场`; }
       closeIt(); refresh(); toast(msg, 'success');
     };
@@ -1426,7 +1460,7 @@ function pickLoose(found, { book } = {}) {
     const tagF = field('统一加标签', tagIn);
     const jGroup = importGroupInput(kind);
     const jGroupF = field('放进分组', jGroup);
-    body.appendChild(field('导成', seg([{ v: 'prompts', l: '提示词' }, { v: 'preambles', l: '前置要求' }, { v: 'randoms', l: '随机条目' }], kind, v => { kind = v; tagF.hidden = jGroupF.hidden = v === 'preambles'; jGroup.setKind(v); })));
+    body.appendChild(field('导成', seg(IMPORT_KINDS, kind, v => { kind = v; tagF.hidden = jGroupF.hidden = !GROUPED(v); if (GROUPED(v)) jGroup.setKind(v); })));
     body.append(tagF, jGroupF);
     if (found.length > 8) {
       const search = input('', '搜名字 / 内容');
@@ -1437,8 +1471,8 @@ function pickLoose(found, { book } = {}) {
     body.appendChild(list);
     const okBtn = btn('导入', async () => {
       if (!picked.size) { toast('先勾几条'); return; }
-      const tags = kind === 'preambles' ? [] : textToTags(tagIn.value);
-      await addRows(kind, found.filter((f, i) => picked.has(i)).map(f => ({ title: f.name, content: f.content, tags: [...tags] })), kind === 'preambles' ? {} : { group: jGroup.value });
+      const tags = GROUPED(kind) ? textToTags(tagIn.value) : [];
+      await addRows(kind, found.filter((f, i) => picked.has(i)).map(f => ({ title: f.name, content: f.content, tags: [...tags] })), GROUPED(kind) ? { group: jGroup.value } : {});
       closeIt(); renderLibrary(); toast(`导入 ${picked.size} 条`, 'success');
     }, 'xjc-btn pri');
     const paintOk = () => { okBtn.textContent = picked.size ? `导入 ${picked.size} 条` : '导入'; okBtn.disabled = !picked.size; };
@@ -1669,11 +1703,14 @@ function setGen(box) {
   const style = select(Object.entries(STYLE_LABEL).map(([v, l]) => ({ v, l })), globalStyle());
   style.onchange = () => setSetting({ defaultStyle: style.value });
   box.appendChild(field('HTML 风格', style));
+  const spec = select([...state.specs.map(p => ({ v: p.id, l: p.name })), { v: 'none', l: '不带' }], globalSpec());
+  spec.onchange = () => setSetting({ defaultSpecId: spec.value });
+  box.appendChild(field('HTML 规范', spec, '小剧场跟随全局时用哪条。规范本身在「库 → HTML 规范」里写、改、加新的。'));
   box.appendChild(toggle('HTML 小剧场分两步出', globalStaged(), v => setSetting({ stagedDefault: v })));
   if (S().writeBackFeature) box.appendChild(toggle('写回记忆（写进聊天的世界书）', globalWriteBack(), v => setSetting({ writeBackDefault: v })));
   box.appendChild(el('div', 'xjc-sec', '内置指令'));
   const nEdited = INSTR.filter(x => instrEdited(x.key)).length;
-  box.appendChild(el('p', 'xjc-hint', `插件自己加在 <Brief> 里的话：纯文字 / HTML / 混排的输出要求、HTML 规则、篇幅、标题、身份、分两步出、楼层下出、AI 自选等。${nEdited ? `已改 ${nEdited} 条。` : '都是默认的。'}`));
+  box.appendChild(el('p', 'xjc-hint', `插件自己加在 <Brief> 里的话：纯文字 / HTML / 混排的输出要求、篇幅、标题、身份、分两步出、楼层下出、AI 自选等。${nEdited ? `已改 ${nEdited} 条。` : '都是默认的。'}`));
   box.appendChild(btn('编辑内置指令', editInstr, 'xjc-btn'));
 
   box.appendChild(el('div', 'xjc-sec', '可选功能'));
@@ -2034,7 +2071,7 @@ function foldSection(box) {
 }
 
 function setData(box) {
-  box.appendChild(el('p', 'xjc-hint', `${state.combos.length} 个小剧场 · ${state.prompts.length} 条提示词 · ${state.randoms.length} 条随机 · ${state.macros.length} 个宏 · ${state.preambles.length} 条前置 · ${state.themes.length} 个自定义主题 · ${state.favorites.length} 收藏 · ${state.recent.length} 最近。存在：${backendName()}。`));
+  box.appendChild(el('p', 'xjc-hint', `${state.combos.length} 个小剧场 · ${state.prompts.length} 条提示词 · ${state.randoms.length} 条随机 · ${state.macros.length} 个宏 · ${state.preambles.length} 条前置 · ${state.specs.length} 条 HTML 规范 · ${state.themes.length} 个自定义主题 · ${state.favorites.length} 收藏 · ${state.recent.length} 最近。存在：${backendName()}。`));
   box.appendChild(el('div', 'xjc-sec', '导出'));
   const withFav = toggle('包含收藏', true);
   const withApi = toggle('包含 API 配置（含密钥，别发给别人）', false);

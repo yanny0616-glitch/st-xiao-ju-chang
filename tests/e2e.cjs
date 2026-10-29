@@ -409,6 +409,22 @@ async function desktop(browser) {
   await page.locator('.xjc-sheet').last().locator('.xjc-btn:text-is("恢复")').click();
   await page.click('.xjc-sheet-ft >> text="保存"');
   ok(await page.evaluate(async () => Object.keys((await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.settings.instr || {}).length === 0), '内置指令全部恢复默认');
+
+  // 3e. HTML 规范是库里的一类：跟随全局带默认那条，小剧场可以指定别的或不带，纯文字不带
+  const specRun = await page.evaluate(async () => {
+    const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
+    const s = await import(base + 'store.js');
+    const g = await import(base + 'gen.js');
+    s.state.specs.push({ id: 'spec_test', name: '测试规范', content: '【自定的HTML规范】可以用 Font Awesome。' });
+    const c0 = s.state.combos.find(x => x.id === 'c_store');
+    const run = async output => (await g.generateTheater({ ...c0, output: { ...c0.output, ...output } }, {})).request[0].messages.map(m => m.content).join('\n');
+    const out = { def: await run({ mode: 'html', spec: '' }), own: await run({ mode: 'mixed', spec: 'spec_test' }), none: await run({ mode: 'html', spec: 'none' }), text: await run({ mode: 'text', spec: 'spec_test' }) };
+    s.state.specs = s.state.specs.filter(x => x.id !== 'spec_test');
+    return out;
+  });
+  ok(specRun.def.includes('【HTML 规范】') && specRun.def.includes('不引用任何外部资源'), 'HTML 小剧场跟随全局：带默认的「手机通用」规范');
+  ok(specRun.own.includes('【自定的HTML规范】') && !specRun.own.includes('不引用任何外部资源'), '小剧场指定别的规范：只带那条，不再带默认的');
+  ok(!specRun.none.includes('【HTML 规范】') && !specRun.text.includes('【HTML 规范】'), '选「不带」或纯文字：不带 HTML 规范');
   // AI 自选：没有带「形式」标签的提示词时，用全部提示词当菜单
   const aiMenu = await page.evaluate(async () => {
     const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';

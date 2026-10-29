@@ -10,7 +10,7 @@ const strip = r => { const { createdAt, updatedAt, ...rest } = r; return rest; }
 export function exportBundle({ withApis = false, withFavorites = true } = {}) {
   return {
     app: APP_ID, version: 1, exportedAt: new Date().toISOString(),
-    preambles: state.preambles.map(strip), prompts: state.prompts.map(strip), randoms: state.randoms.map(strip),
+    preambles: state.preambles.map(strip), specs: state.specs.map(strip), prompts: state.prompts.map(strip), randoms: state.randoms.map(strip),
     macros: state.macros.map(strip), combos: state.combos.map(strip), themes: state.themes.map(strip),
     ...(withFavorites ? { favorites: clone(state.favorites) } : {}),
     ...(withApis ? { apis: clone(state.apis) } : {}),
@@ -21,6 +21,7 @@ export function exportCombo(combo) {
   return {
     app: APP_ID, version: 1, kind: 'combo',
     combos: [strip(combo)], preambles: state.preambles.filter(p => p.id === combo.preambleId).map(strip),
+    specs: state.specs.filter(p => p.id === combo.output?.spec).map(strip),
     prompts: state.prompts.filter(p => ids.has(p.id)).map(strip),
     randoms: combo.random?.count ? state.randoms.map(strip) : [],
     macros: state.macros.map(strip),
@@ -52,7 +53,7 @@ function normalizeCombo(c) {
     output: {
       mode: ['text', 'html', 'mixed'].includes(o.mode) ? o.mode : 'text', wrapTag: /^[a-zA-Z][\w-]{0,30}$/.test(o.wrapTag || '') ? o.wrapTag : '',
       length: ['default', 'short', 'medium', 'long', 'custom'].includes(o.length) ? o.length : 'default', customChars: num(o.customChars, 900, 50, 20000),
-      style: ['free', 'vars', 'strict'].includes(o.style) ? o.style : '', staged: typeof o.staged === 'boolean' ? o.staged : null,
+      style: ['free', 'vars', 'strict'].includes(o.style) ? o.style : '', staged: typeof o.staged === 'boolean' ? o.staged : null, spec: str(o.spec, 80),
     },
     context: context ? { chat: context.chat === 'none' ? 'none' : 'recent', rounds: num(context.rounds, 12, 1, 100), worldInfo: context.worldInfo !== false, summary: context.summary !== false } : null,
     who: c.who === 'observer' ? 'none' : ['persona', 'custom', 'none'].includes(c.who) ? c.who : '', whoText: str(c.whoText, 2000),
@@ -63,6 +64,7 @@ function normalizeCombo(c) {
 }
 const normalizers = {
   preambles: r => ({ id: str(r.id, 80), name: str(r.name, 60) || '未命名', content: str(r.content) }),
+  specs: r => ({ id: str(r.id, 80), name: str(r.name, 60) || '未命名', content: str(r.content, 60000) }),
   prompts: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content) }),
   randoms: r => ({ id: str(r.id, 80), title: str(r.title, 60) || '未命名', tags: tags(r.tags), group: str(r.group, 30), content: str(r.content) }),
   macros: r => ({
@@ -79,13 +81,14 @@ export async function importBundle(data) {
   if (!data || typeof data !== 'object') throw new Error('不是有效的导出文件。');
   const idMap = Object.create(null);
   let n = 0;
-  for (const name of ['preambles', 'prompts', 'randoms', 'macros', 'apis', 'themes', 'combos']) {
+  for (const name of ['preambles', 'specs', 'prompts', 'randoms', 'macros', 'apis', 'themes', 'combos']) {
     const rows = Array.isArray(data[name]) ? data[name] : [];
     for (const raw of rows) {
       if (!raw || typeof raw !== 'object') continue;
       const row = normalizers[name](raw);
       if (name === 'combos') {
         row.preambleId = idMap[row.preambleId] || row.preambleId;
+        if (row.output.spec && row.output.spec !== 'none') row.output.spec = idMap[row.output.spec] || row.output.spec;
         for (const pt of row.parts) pt.items = pt.items.map(it => (it.startsWith('p:') && idMap[it.slice(2)] ? `p:${idMap[it.slice(2)]}` : it));
       }
       const srcId = row.id;
@@ -168,8 +171,8 @@ export function classifyJson(data) {
 export async function addRows(kind, rows, extra = {}) {
   const made = [];
   for (const r of rows) {
-    const row = kind === 'preambles'
-      ? { id: uid('pre'), name: String(r.title || r.name).slice(0, 60), content: r.content, createdAt: new Date().toISOString() }
+    const row = kind === 'preambles' || kind === 'specs'
+      ? { id: uid(kind === 'specs' ? 'spec' : 'pre'), name: String(r.title || r.name).slice(0, 60), content: r.content, createdAt: new Date().toISOString() }
       : { id: uid(kind.slice(0, 3)), title: String(r.title || r.name).slice(0, 60), tags: r.tags || [], group: String(extra.group || r.group || '').trim().slice(0, 30), content: r.content, createdAt: new Date().toISOString() };
     state[kind].push(row);
     made.push(row);
