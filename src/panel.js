@@ -15,7 +15,7 @@ import {
   field, input, textarea, select, toggle, seg, tagsToText, textToTags, openSheet, setSheetHost, closeAllSheets,
   closeTopSheet, confirmSheet, snapshotInfo, requestView, openViewer, closeViewer, viewerOpen, keepButtons, favIcon,
 } from './ui.js';
-import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks, addRows, combosFromPrompts, importDarkArchives, clearLibrary } from './data.js';
+import { exportBundle, exportCombo, importBundle, classifyJson, parseTextBlocks, addRows, combosFromPrompts, importDarkArchives, clearLibrary, bookRow } from './data.js';
 import { isFavorite, toggleFavorite, chatTheaters } from './favs.js';
 import { newPart, partPool, itemLabel, itemAlive, usesPrompt, comboPromptIds } from './parts.js';
 import { attachToLatest } from './chat.js';
@@ -1338,7 +1338,7 @@ function pickPrompts(selected, done) {
 // ── 导入 ──
 function importFlow() {
   openSheet('导入', (body, foot, closeIt) => {
-    body.appendChild(el('p', 'xjc-hint', '① 粘贴文本：每条用一行「## 标题 #标签 #标签」开头，下面是内容，可以一次贴很多条。② 选文件：本插件导出的、Float 小剧场 APP 导出的直接进库；暗柜「夜间档案」每份变成两条提示词 + 一个小剧场；其它 JSON（酒馆预设、世界书、角色卡、别人的生成器）会把里面像提示词的段落列出来让你挑。'));
+    body.appendChild(el('p', 'xjc-hint', '① 粘贴文本：每条用一行「## 标题 #标签 #标签」开头，下面是内容，可以一次贴很多条。② 选文件：本插件导出的、Float 小剧场 APP 导出的直接进库；暗柜「夜间档案」每份变成两条提示词 + 一个小剧场；酒馆导出的世界书列出条目让你勾；其它 JSON（酒馆预设、角色卡、别人的生成器）会把里面像提示词的段落列出来让你挑。③ 从酒馆世界书选：直接挑酒馆里已有的世界书，不用先导出。'));
     const ta = textarea('', 8, '## 雨夜便利店 #场景 #日常\n写{{char}}在深夜便利店……\n\n## 弹幕流 #形式 #前端\n输出一段带弹幕滚动的 HTML……');
     body.appendChild(ta);
     let kind = 'prompts';
@@ -1354,6 +1354,7 @@ function importFlow() {
       if (kind === 'prompts' && asCombo.input.checked) { await combosFromPrompts(made); msg += `，建了 ${made.length} 个小剧场`; }
       closeIt(); refresh(); toast(msg, 'success');
     };
+    foot.appendChild(btn('从酒馆世界书选', () => { closeIt(); pickTavernBook(); }, 'xjc-btn'));
     foot.appendChild(btn('选文件', async () => {
       try {
         const f = await pickFile();
@@ -1371,6 +1372,7 @@ function importFlow() {
         if (got.dark) { const n = await importDarkArchives(got.dark); closeIt(); refresh(); toast(`导入 ${n} 份暗柜档案，各建了一个小剧场`, 'success'); return; }
         if (got.rows) { await importRows(got.rows); return; }
         closeIt();
+        if (got.book) { pickLoose(got.book, { book: f.name.replace(/\.json$/i, '') }); return; }
         pickLoose(got.loose);
       } catch (e) { fail(e); }
     }, 'xjc-btn'));
@@ -1381,11 +1383,45 @@ function importFlow() {
     }, 'xjc-btn pri'));
   });
 }
-function pickLoose(found) {
-  openSheet(`挑要导入的段落（${found.length}）`, (body, foot, closeIt) => {
+/** 从酒馆里已有的世界书导入：点一本，列出条目来挑 */
+function pickTavernBook() {
+  openSheet('从酒馆世界书选', (body, foot, closeIt) => fillBooks(body, closeIt).catch(fail));
+}
+/** 列出酒馆里的世界书；酒馆这会儿在用的排前面 */
+async function fillBooks(body, closeIt) {
+  const [names, def] = await Promise.all([worldNames(), tavernWorlds()]);
+  if (!names.length) { body.appendChild(el('div', 'xjc-empty', '酒馆里还没有世界书')); return; }
+  body.appendChild(el('p', 'xjc-hint', '点一本，下一步勾要导入的条目。'));
+  if (names.length > 8) {
+    const search = input('', '搜书名');
+    search.oninput = () => { const q = search.value.trim().toLowerCase(); for (const r of list.children) r.hidden = !!q && !r.dataset.n.toLowerCase().includes(q); };
+    body.appendChild(search);
+  }
+  const list = el('div');
+  body.appendChild(list);
+  for (const n of [...names].sort((x, y) => def.has(y) - def.has(x))) {
+    const row = el('div', 'xjc-check xjc-pick-book');
+    row.dataset.n = n;
+    const mid = el('div', 'xjc-grow', n);
+    if (def.has(n)) mid.appendChild(el('span', 'xjc-wi-why', def.get(n)));
+    row.append(mid, el('span', 'xjc-wi-state', '›'));
+    row.onclick = async () => {
+      try {
+        const rows = (await loadBook(n)).filter(e => typeof e.content === 'string' && e.content.trim()).map(bookRow);
+        if (!rows.length) { toast(`「${n}」里没有带内容的条目`); return; }
+        closeIt();
+        pickLoose(rows, { book: n });
+      } catch (e) { fail(e); }
+    };
+    list.appendChild(row);
+  }
+}
+/** opts.book：来自世界书（书名），条目带开关和蓝绿灯 */
+function pickLoose(found, { book } = {}) {
+  openSheet(book ? `世界书「${book}」（${found.length} 条）` : `挑要导入的段落（${found.length}）`, (body, foot, closeIt) => {
     const picked = new Set();
     let kind = 'prompts', q = '';
-    body.appendChild(el('p', 'xjc-hint', `没认出这个格式，把里面像提示词的 ${found.length} 段列出来了。勾上要的；点正文能展开看全文。`));
+    body.appendChild(el('p', 'xjc-hint', book ? '勾上要导入的条目，名字就用条目标题；点正文能展开看全文。灰掉的是在酒馆里禁用的条目，也能导。' : `没认出这个格式，把里面像提示词的 ${found.length} 段列出来了。勾上要的；点正文能展开看全文。`));
     const tagIn = input('', '空格分隔，可空');
     const tagF = field('统一加标签', tagIn);
     const jGroup = importGroupInput(kind);
@@ -1412,7 +1448,7 @@ function pickLoose(found) {
       const shown = visible();
       if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的段落'));
       for (const [i, f] of shown) {
-        const row = el('label', 'xjc-check');
+        const row = el('label', `xjc-check${f.off ? ' xjc-off' : ''}`);
         const cb = el('input');
         cb.type = 'checkbox';
         cb.checked = picked.has(i);
@@ -1420,7 +1456,9 @@ function pickLoose(found) {
         const mid = el('div', 'xjc-grow');
         const ex = el('div', 'd', f.content);
         ex.onclick = e => { e.preventDefault(); ex.classList.toggle('full'); };
-        mid.append(el('div', '', f.name), ex);
+        const nm = el('div', '', f.name);
+        if (f.lamp) nm.appendChild(el('span', 'xjc-wi-why', f.off ? '已禁用' : { constant: '🔵 蓝灯', normal: '🟢 绿灯', vectorized: '🔗 向量' }[f.lamp]));
+        mid.append(nm, ex);
         if (f.path) mid.appendChild(el('div', 'xjc-path', f.path));
         row.append(cb, mid);
         list.appendChild(row);

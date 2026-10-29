@@ -226,16 +226,20 @@ export function openViewer(result, { actions = [], onAction } = {}) {
   bar.append(...keepButtons(() => frame, result, 'xjc-btn sm ghost icon'));
   const body = el('div', 'xjc-viewer-body');
   root.append(bar, body, info, el('div', 'xjc-viewer-foot'));
-  document.body.appendChild(root);
+  // 电脑上全屏和面板一样大，外面这层压暗，点一下就关
+  const shade = el('div', 'xjc-viewer-shade');
+  shade.onclick = closeViewer;
+  document.body.append(shade, root);
   frame = mountFrame(body, segmentsOf(result), { fill: true, onAction: onAction ? text => { closeViewer(); onAction(text); } : null });
   const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); closeViewer(); } };
   document.addEventListener('keydown', onKey, true);
-  viewer = { root, onKey };
+  viewer = { root, shade, onKey };
 }
 export function closeViewer() {
   if (!viewer) return;
   document.removeEventListener('keydown', viewer.onKey, true);
   viewer.root.remove();
+  viewer.shade.remove();
   viewer = null;
 }
 export const viewerOpen = () => !!viewer;

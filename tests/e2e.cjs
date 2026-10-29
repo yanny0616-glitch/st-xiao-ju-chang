@@ -496,8 +496,11 @@ async function desktop(browser) {
   await page.click('.xjc-tabs button[data-v="fav"]');
   await page.click('.xjc-view[data-view="fav"] .xjc-item');
   await page.waitForSelector('.xjc-viewer .xjc-frame');
+  const vbox = await page.$eval('.xjc-viewer', n => { const r = n.getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), shade: !!document.querySelector('.xjc-viewer-shade') }; });
+  ok(vbox.w === 920 && vbox.l === 180 && vbox.shade, `电脑上全屏和面板一样大、居中（${JSON.stringify(vbox)}）`);
   await page.screenshot({ path: `${SHOTS}/d-06-viewer.png` });
-  await page.click('.xjc-viewer >> text=‹ 返回');
+  await page.click('.xjc-viewer-shade', { position: { x: 20, y: 20 } });
+  ok(await page.locator('.xjc-viewer').count() === 0 && await page.locator('.xjc-viewer-shade').count() === 0, '点全屏外面的暗处就关掉');
 
   // 6. 楼层功能默认关：没有「挂到聊天」、消息菜单里没有面具按钮；打开后才有
   await page.click('.xjc-tabs button[data-v="stage"]');
@@ -620,6 +623,35 @@ async function desktop(browser) {
   await sleep(500);
   const dark = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; const c = s.combos.find(x => x.name === '午夜电台'); return c && { n: c.parts.flatMap(pt => pt.items).length, mode: c.output.mode, tags: c.tags }; });
   ok(dark && dark.n === 2 && dark.mode === 'mixed' && dark.tags.includes('暗柜'), '暗柜档案导入成两条提示词 + 一个小剧场');
+
+  // 7d1. 世界书：选文件认出条目（禁用的标出来），从酒馆世界书直接挑
+  const bookFile = path.join(SHOTS, '剧本世界书.json');
+  fs.writeFileSync(bookFile, JSON.stringify({ entries: {
+    1: { uid: 1, displayIndex: 1, key: ['弹幕'], comment: '弹幕流', content: '输出一段带弹幕滚动的 HTML。', disable: true },
+    0: { uid: 0, displayIndex: 0, key: ['雨夜'], comment: '雨夜电话亭', content: '{{char}}在雨夜的电话亭给{{user}}打电话。', constant: true },
+  } }));
+  await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("导入")');
+  const [ch3] = await Promise.all([page.waitForEvent('filechooser'), page.click('.xjc-sheet .xjc-btn:has-text("选文件")')]);
+  await ch3.setFiles(bookFile);
+  await page.waitForSelector('.xjc-sheet h3:has-text("世界书「剧本世界书」")');
+  const bookRows = await page.$$eval('.xjc-sheet .xjc-check', ns => ns.map(n => ({ t: n.textContent, off: n.classList.contains('xjc-off'), on: n.querySelector('input').checked })));
+  ok(bookRows.length === 2 && bookRows[0].t.includes('雨夜电话亭') && bookRows[0].t.includes('蓝灯') && bookRows[1].off && bookRows[1].t.includes('已禁用') && !bookRows.some(r => r.on),
+    `世界书文件：按酒馆顺序列条目、用标题当名字、禁用的标出来、默认不勾（${JSON.stringify(bookRows)}）`);
+  await page.click('.xjc-sheet .xjc-check:has-text("雨夜电话亭") input');
+  await page.click('.xjc-sheet .xjc-btn.pri');
+  await sleep(300);
+  await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("导入")');
+  await page.click('.xjc-sheet .xjc-btn:has-text("从酒馆世界书选")');
+  await page.click('.xjc-sheet .xjc-pick-book:has-text("雨城")');
+  await page.waitForSelector('.xjc-sheet h3:has-text("世界书「雨城」")');
+  await page.screenshot({ path: `${SHOTS}/d-07b-import-book.png` });
+  await page.click('.xjc-sheet .xjc-check:has-text("便利店") input');
+  await page.click('.xjc-sheet .xjc-seg >> text=随机条目');
+  await page.click('.xjc-sheet .xjc-btn.pri');
+  await sleep(300);
+  const fromBook = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; return { p: s.prompts.find(x => x.title === '雨夜电话亭')?.content, r: s.randoms.find(x => x.title === '便利店')?.content, off: s.prompts.some(x => x.title === '弹幕流') }; });
+  ok(fromBook.p?.includes('电话亭') && !fromBook.off, '世界书文件里勾的条目导成提示词，没勾的不导');
+  ok(fromBook.r?.includes('晴天'), '从酒馆世界书「雨城」直接挑条目导成随机条目');
 
   // 7d2. 舞台选小剧场：点卡片弹列表，能搜索，点一行设为当前
   await page.click('.xjc-tabs button[data-v="stage"]');

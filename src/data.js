@@ -135,11 +135,27 @@ function darkArchives(data) {
   return list.length && list.every(Boolean) ? list : null;
 }
 
-/** 返回 { bundle } 或 { dark: [...] } 或 { rows: [{title, tags, content}] } 或 { loose: [...] } */
+/** 世界书条目 → 挑选列表的一行：名字用标题，带上开关和蓝绿灯 */
+export const bookRow = e => ({
+  name: String(e.comment || e.name || (e.key || e.keys || []).join('、') || `条目 ${e.uid ?? ''}`).trim().slice(0, 60),
+  content: String(e.content).trim(), off: !!e.disable || e.enabled === false, lamp: e.constant ? 'constant' : e.vectorized ? 'vectorized' : 'normal',
+});
+/** 酒馆导出的世界书文件，按酒馆里的显示顺序。角色卡不算：卡里除了世界书还有别的段落，走通用扫描 */
+function worldBook(data) {
+  const raw = data?.entries && typeof data.entries === 'object' ? Object.values(data.entries) : [];
+  const list = raw.filter(e => e && typeof e === 'object' && typeof e.content === 'string' && e.content.trim() && Array.isArray(e.key || e.keys));
+  if (!list.length || list.length < raw.length / 2) return null;
+  const at = e => e.displayIndex ?? e.uid ?? 0;
+  return list.sort((x, y) => at(x) - at(y)).map(bookRow);
+}
+
+/** 返回 { bundle } 或 { dark: [...] } 或 { book: [...] } 或 { rows: [{title, tags, content}] } 或 { loose: [...] } */
 export function classifyJson(data) {
   if (isOwnBundle(data)) return { bundle: data };
   const dark = darkArchives(data);
   if (dark) return { dark };
+  const book = worldBook(data);
+  if (book) return { book };
   if (Array.isArray(data) && data.length && data.every(t => t && typeof t.title === 'string' && typeof t.content === 'string')) {
     return { rows: data.map(t => ({ title: t.title, tags: tags(t.tags), content: t.content })) };
   }

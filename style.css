@@ -228,6 +228,16 @@
 .xjc-req-msg .xjc-pre { max-height: 360px; }
 .xjc-viewer-info { flex: none; max-height: 45%; overflow: auto; padding: 10px 14px; border-top: 1px solid var(--xjc-ui-line); }
 .xjc-viewer-foot { flex: none; height: var(--xjc-safe-b); }
+.xjc-viewer-shade { display: none; }
+/* 电脑上和面板一样大、居中；手机上才铺满整屏 */
+@media (min-width: 701px) {
+    .xjc-viewer-shade { display: block; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9599; background: rgba(0, 0, 0, .45); }
+    .xjc-viewer {
+        width: min(920px, 96vw); height: min(900px, 92vh); height: min(900px, 92dvh);
+        left: calc((100vw - min(920px, 96vw)) / 2); top: calc((100vh - min(900px, 92vh)) / 2); top: calc((100dvh - min(900px, 92dvh)) / 2);
+        padding: 0; overflow: hidden; border: 1px solid var(--xjc-ui-line); border-radius: 14px; box-shadow: 0 10px 40px var(--xjc-ui-shadow);
+    }
+}
 
 /* ── 聊天里的小剧场 ── */
 .xjc-tail { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
@@ -310,7 +320,7 @@
     --xjc-ui-acc: #8b2e2e; --xjc-ui-on: #f6f1e8; --xjc-ui-em: #6b645a; --xjc-ui-shadow: rgba(28, 26, 23, .25);
     font-family: var(--xjc-sans);
 }
-[data-xjc-theme=magazine] .xjc-panel { border-radius: 0; border-color: var(--xjc-ui-ink); }
+[data-xjc-theme=magazine] .xjc-panel, .xjc-viewer[data-xjc-theme=magazine] { border-radius: 0; border-color: var(--xjc-ui-ink); }
 [data-xjc-theme=magazine] .xjc-hd { margin: 0 18px; padding: 16px 0 8px; border-bottom: 2px solid var(--xjc-ui-ink); align-items: flex-end; }
 [data-xjc-theme=magazine] .xjc-kicker { display: flex; justify-content: space-between; max-width: 360px; font-size: calc(10px * var(--xjc-fs, 1)); letter-spacing: .3em; }
 [data-xjc-theme=magazine] .xjc-hd h2 { font-family: var(--xjc-serif); font-size: calc(30px * var(--xjc-fs, 1)); line-height: 1; margin-top: 8px; }
@@ -369,7 +379,7 @@
 [data-xjc-theme=sticky] .xjc-panel, .xjc-viewer[data-xjc-theme=sticky] {
     background: radial-gradient(circle at 20% 10%, #f3eee4, transparent 40%), radial-gradient(circle at 80% 90%, #e2dacb, transparent 45%), var(--xjc-ui-bg);
 }
-[data-xjc-theme=sticky] .xjc-panel { border: 0; border-radius: 18px; }
+[data-xjc-theme=sticky] .xjc-panel, .xjc-viewer[data-xjc-theme=sticky] { border: 0; border-radius: 18px; }
 [data-xjc-theme=sticky] .xjc-hd { border: 0; padding: 22px 16px 6px; }
 [data-xjc-theme=sticky] .xjc-hd h2 { display: inline-block; position: relative; font-size: calc(19px * var(--xjc-fs, 1)); font-weight: 800; padding: 5px 15px; background: #fff8c2; transform: rotate(-2deg); box-shadow: 0 2px 0 rgba(0, 0, 0, .06); }
 [data-xjc-theme=sticky] .xjc-hd h2::before { content: ""; position: absolute; left: 50%; top: -8px; width: 44px; height: 14px; margin-left: -22px; background: rgba(255, 255, 255, .6); transform: rotate(3deg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
@@ -432,7 +442,7 @@
     --xjc-ui-acc: #7ee787; --xjc-ui-on: #04120a; --xjc-ui-amb: #f2c94c; --xjc-ui-em: #8fb39a; --xjc-ui-shadow: rgba(0, 0, 0, .6);
     font-family: var(--xjc-mono);
 }
-[data-xjc-theme=terminal] .xjc-panel { border-radius: 0; }
+[data-xjc-theme=terminal] .xjc-panel, .xjc-viewer[data-xjc-theme=terminal] { border-radius: 0; }
 [data-xjc-theme=terminal] .xjc-panel::after, .xjc-viewer[data-xjc-theme=terminal]::after {
     content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 8;
     background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, .18) 2px 3px);
@@ -509,7 +519,7 @@
     --xjc-ui-acc: #c0392b; --xjc-ui-on: #ffffff; --xjc-ui-em: #666; --xjc-ui-shadow: rgba(0, 0, 0, .18);
     font-family: var(--xjc-courier);
 }
-[data-xjc-theme=script] .xjc-panel { border-radius: 0; border-color: var(--xjc-ui-ink); }
+[data-xjc-theme=script] .xjc-panel, .xjc-viewer[data-xjc-theme=script] { border-radius: 0; border-color: var(--xjc-ui-ink); }
 [data-xjc-theme=script] .xjc-panel::before {
     content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 26px; z-index: 3; pointer-events: none;
     border-right: 1px solid #e3e3dd;
@@ -574,7 +584,7 @@
     font-family: var(--xjc-sans);
 }
 [data-xjc-theme=night] .xjc-panel, .xjc-viewer[data-xjc-theme=night] { background: radial-gradient(ellipse at 85% -10%, rgba(227, 180, 101, .16), transparent 45%), var(--xjc-ui-bg); }
-[data-xjc-theme=night] .xjc-panel { border-color: #2c3040; border-radius: 16px; }
+[data-xjc-theme=night] .xjc-panel, .xjc-viewer[data-xjc-theme=night] { border-color: #2c3040; border-radius: 16px; }
 [data-xjc-theme=night] .xjc-hd { border-bottom-color: #2c3040; padding: 16px 16px 10px; }
 [data-xjc-theme=night] .xjc-kicker { display: flex; gap: 12px; font-size: calc(10px * var(--xjc-fs, 1)); letter-spacing: .26em; color: var(--xjc-ui-acc); opacity: .75; }
 [data-xjc-theme=night] .xjc-hd h2 { font-family: var(--xjc-serif); font-size: calc(24px * var(--xjc-fs, 1)); letter-spacing: .12em; margin-top: 6px; }
@@ -606,7 +616,7 @@
 [data-xjc-theme=letter] .xjc-panel, .xjc-viewer[data-xjc-theme=letter] {
     background: repeating-linear-gradient(transparent 0 31px, rgba(196, 104, 107, .1) 31px 32px), var(--xjc-ui-bg);
 }
-[data-xjc-theme=letter] .xjc-panel { border-radius: 6px; border-color: #ead7cf; }
+[data-xjc-theme=letter] .xjc-panel, .xjc-viewer[data-xjc-theme=letter] { border-radius: 6px; border-color: #ead7cf; }
 [data-xjc-theme=letter] .xjc-hd { border-bottom: 1px dashed var(--xjc-ui-acc); margin: 0 16px; padding: 16px 0 10px; }
 [data-xjc-theme=letter] .xjc-kicker { display: block; font-size: calc(11px * var(--xjc-fs, 1)); color: var(--xjc-ui-acc); letter-spacing: .1em; }
 [data-xjc-theme=letter] .xjc-kicker .no { display: none; }
@@ -645,7 +655,7 @@
     font-family: var(--xjc-sans); font-weight: 500;
 }
 [data-xjc-theme=candy] .xjc-panel, .xjc-viewer[data-xjc-theme=candy] { background: linear-gradient(160deg, rgba(255, 228, 240, .6) 0%, rgba(240, 232, 255, .6) 50%, rgba(224, 240, 255, .6) 100%), var(--xjc-ui-bg); }
-[data-xjc-theme=candy] .xjc-panel { border: 0; border-radius: 26px; }
+[data-xjc-theme=candy] .xjc-panel, .xjc-viewer[data-xjc-theme=candy] { border: 0; border-radius: 26px; }
 [data-xjc-theme=candy] .xjc-hd { border: 0; padding: 18px 16px 6px; }
 [data-xjc-theme=candy] .xjc-hd h2 { font-size: calc(22px * var(--xjc-fs, 1)); font-weight: 800; background: linear-gradient(90deg, #ff5f9e, #a77bff); -webkit-background-clip: text; background-clip: text; color: transparent; }
 [data-xjc-theme=candy] .xjc-hd h2::after { content: " ✦"; color: #ffb547; -webkit-text-fill-color: #ffb547; font-size: .7em; }
@@ -691,7 +701,7 @@
     background: radial-gradient(circle at 12% 18%, rgba(150, 120, 70, .08) 0 2px, transparent 3px) 0 0 / 23px 29px,
                 radial-gradient(circle at 70% 60%, rgba(150, 120, 70, .06) 0 1.5px, transparent 2.5px) 0 0 / 31px 37px, var(--xjc-ui-bg);
 }
-[data-xjc-theme=xuan] .xjc-panel { border-radius: 2px; border-color: #c9bb9f; }
+[data-xjc-theme=xuan] .xjc-panel, .xjc-viewer[data-xjc-theme=xuan] { border-radius: 2px; border-color: #c9bb9f; }
 [data-xjc-theme=xuan] .xjc-hd { margin: 0 18px; padding: 18px 0 10px; border-bottom: 3px double #8a7a5e; }
 [data-xjc-theme=xuan] .xjc-kicker { display: block; font-size: calc(11px * var(--xjc-fs, 1)); letter-spacing: .3em; opacity: .6; }
 [data-xjc-theme=xuan] .xjc-kicker .no { display: none; }
@@ -755,6 +765,7 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
 
 /* ── 自带主题 · 手机 ── */
 @media (max-width: 700px) {
+    .xjc-viewer[data-xjc-theme] { border-radius: 0; }
     [data-xjc-theme=candy] .xjc-panel, [data-xjc-theme=night] .xjc-panel { border-radius: 0; }
     [data-xjc-theme=candy] .xjc-tabs { margin: 0 14px calc(var(--xjc-safe-b) + 8px); border-top: 0; }
     [data-xjc-theme=candy] .xjc-sheet, [data-xjc-theme=night] .xjc-sheet { border-radius: 22px 22px 0 0; }
@@ -838,6 +849,8 @@ body.xjc-motion-off .xjc-root *, body.xjc-motion-off .xjc-viewer *, body.xjc-mot
 .xjc-wi-entries[hidden] { display: none; }
 .xjc-wi-entry { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 12px; }
 .xjc-wi-entry.off { opacity: .45; }
+.xjc-check.xjc-off > .xjc-grow { opacity: .5; }
+.xjc-pick-book { cursor: pointer; align-items: center; border-bottom: 1px solid var(--xjc-ui-line); }
 .xjc-wi-entry .xjc-grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xjc-wi-lamp { flex: none; font-size: 11px; }
 .xjc-wi-state { flex: none; font-size: 11px; opacity: .6; }
