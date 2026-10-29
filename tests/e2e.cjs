@@ -425,6 +425,7 @@ async function desktop(browser) {
   ok(specRun.def.includes('【HTML 规范】') && specRun.def.includes('不引用任何外部资源'), 'HTML 小剧场跟随全局：带默认的「手机通用」规范');
   ok(specRun.own.includes('【自定的HTML规范】') && !specRun.own.includes('不引用任何外部资源'), '小剧场指定别的规范：只带那条，不再带默认的');
   ok(!specRun.none.includes('【HTML 规范】') && !specRun.text.includes('【HTML 规范】'), '选「不带」或纯文字：不带 HTML 规范');
+  ok(await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.combos.filter(c => c.output?.mode === 'html').every(c => c.output.spec !== 'none')), '新装：自带的 HTML 小剧场都跟随全局 HTML 规范（不会被迁移成「不带」）');
   // AI 自选：没有带「形式」标签的提示词时，用全部提示词当菜单
   const aiMenu = await page.evaluate(async () => {
     const base = '/scripts/extensions/third-party/st-xiao-ju-chang/src/';
@@ -668,6 +669,25 @@ async function desktop(browser) {
   const fromBook = await page.evaluate(async () => { const s = (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state; return { p: s.prompts.find(x => x.title === '雨夜电话亭')?.content, r: s.randoms.find(x => x.title === '便利店')?.content, off: s.prompts.some(x => x.title === '弹幕流') }; });
   ok(fromBook.p?.includes('电话亭') && !fromBook.off, '世界书文件里勾的条目导成提示词，没勾的不导');
   ok(fromBook.r?.includes('晴天'), '从酒馆世界书「雨城」直接挑条目导成随机条目');
+
+  // 7d1b. 「换一个」里可以标爱用、按爱用筛选；小剧场和提示词都能点开看全文
+  await page.click('.xjc-tabs button[data-v="stage"]');
+  await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
+  await page.click('.xjc-sheet .xjc-item:has-text("塔罗屋") .xjc-btn[title="标为爱用"]');
+  await page.click('.xjc-sheet .xjc-chip:has-text("爱用")');
+  const favNames = await page.$$eval('.xjc-sheet .xjc-list .xjc-item .t', ts => ts.map(t => t.textContent));
+  ok(favNames.length === 1 && favNames[0] === '塔罗屋', `「★ 爱用」筛选（${favNames}）`);
+  await page.click('.xjc-sheet .xjc-item:has-text("塔罗屋") .xjc-btn[title="查看"]');
+  ok((await page.locator('.xjc-sheet summary').allTextContents()).includes('深巷塔罗屋'), '小剧场详情列出提示词');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("用这个")');
+  await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
+  await page.click('.xjc-sheet .xjc-seg button:has-text("直接用提示词")');
+  await page.evaluate(() => document.querySelectorAll('.xjc-sheet details').forEach(d => { d.open = true; }));
+  await page.click('.xjc-sheet .xjc-item:has(.t:text-is("深夜便利店")) .xjc-btn[title="查看"]');
+  ok((await page.textContent('.xjc-sheet .xjc-pre-full')).includes('店员在打瞌睡'), '提示词详情显示全文');
+  await page.click('.xjc-sheet .xjc-x >> nth=-1');
+  await page.click('.xjc-sheet .xjc-x');
+  await page.click('.xjc-tabs button[data-v="library"]');
 
   // 7d2. 舞台选小剧场：点卡片弹列表，能搜索，点一行设为当前
   await page.click('.xjc-tabs button[data-v="stage"]');

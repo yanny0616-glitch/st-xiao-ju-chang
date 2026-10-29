@@ -148,6 +148,8 @@ export async function load() {
   if (!state.settings.seeded) {
     seedDefaults(false);
     state.settings.seeded = true;
+    // 新装的库已经是新格式，不用迁移（自带的「前端」提示词不能被当成用户自己写的规则）
+    state.settings.specsMigrated = true;
     await saveAll();
   }
   // 0.4.2 起提示词按「段」排；旧的 promptIds 换过来

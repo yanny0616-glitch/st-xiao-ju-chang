@@ -226,6 +226,8 @@
 .xjc-req-msg > summary b { font-weight: 700; }
 .xjc-req-msg > summary span { opacity: .6; }
 .xjc-req-msg .xjc-pre { max-height: 360px; }
+.xjc-pre.xjc-pre-full { max-height: none; font-size: .9em; }
+.xjc-btn.icon.xjc-on { color: var(--xjc-ui-acc); opacity: 1; }
 .xjc-viewer-info { flex: none; max-height: 45%; overflow: auto; padding: 10px 14px; border-top: 1px solid var(--xjc-ui-line); }
 .xjc-viewer-foot { flex: none; height: var(--xjc-safe-b); }
 .xjc-viewer-shade { display: none; }

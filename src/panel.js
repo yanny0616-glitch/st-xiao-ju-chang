@@ -331,9 +331,11 @@ function pickCombo() {
     const newBtn = btn('＋ 新建小剧场', () => { closeIt(); editCombo(null); }, 'xjc-btn');
     foot.append(newBtn, useBtn);
     let tags = [];
+    // 小剧场可以标「爱用」：筛选里多一个「★ 爱用」，列表里排在前面
+    const FAV = '\u0000fav';
     const build = () => {
       tags = allTags(mode === 'combos' ? state.combos : state.prompts);
-      chips.hidden = !tags.length;
+      chips.hidden = !tags.length && mode !== 'combos';
       hint.hidden = preF.hidden = outF.hidden = mode !== 'prompts';
       search.hidden = (mode === 'combos' ? state.combos : state.prompts).length <= 6;
       newBtn.hidden = mode !== 'combos';
@@ -343,8 +345,8 @@ function pickCombo() {
     const paintUse = () => { useBtn.textContent = picked.size ? `用这 ${picked.size} 条` : '用选中的提示词'; };
     const drawTags = () => {
       chips.innerHTML = '';
-      for (const t of ['', ...tags]) {
-        const c = el('button', 'xjc-chip' + (tag === t ? ' on' : ''), t ? '#' + t : '全部');
+      for (const t of ['', ...(mode === 'combos' ? [FAV] : []), ...tags]) {
+        const c = el('button', 'xjc-chip' + (tag === t ? ' on' : ''), t === FAV ? `★ 爱用 ${state.combos.filter(x => x.fav).length}` : t ? '#' + t : '全部');
         c.type = 'button';
         c.onclick = () => { tag = t; drawTags(); draw(); };
         chips.appendChild(c);
@@ -362,6 +364,10 @@ function pickCombo() {
             draw();
           }, picked.has(p.id) ? `第 ${order.indexOf(p.id) + 1} 条` : '');
           if (picked.has(p.id)) it.classList.add('on');
+          it.appendChild(ibtn('fa-eye', '查看', e => {
+            e.stopPropagation();
+            viewPrompt(p, { isPicked: () => picked.has(p.id), onToggle: () => { if (picked.has(p.id)) picked.delete(p.id); else picked.add(p.id); draw(); }, onChange: draw });
+          }));
           return it;
         };
         const whole = (g, inG) => {
@@ -372,15 +378,18 @@ function pickCombo() {
         paintUse();
         return;
       }
-      const shown = state.combos.filter(c => (!tag || (c.tags || []).includes(tag)) && (!q || (c.name + ' ' + (c.tags || []).join(' ')).toLowerCase().includes(q)));
-      if (!shown.length) list.appendChild(el('div', 'xjc-empty', '没有匹配的小剧场'));
+      const shown = state.combos.filter(c => (tag === FAV ? c.fav : !tag || (c.tags || []).includes(tag)) && (!q || (c.name + ' ' + (c.tags || []).join(' ')).toLowerCase().includes(q)))
+        .sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
+      if (!shown.length) list.appendChild(el('div', 'xjc-empty', tag === FAV ? '还没有爱用的小剧场，点每行的 ☆ 标一个。' : '没有匹配的小剧场'));
+      const use = c => { setSetting({ currentComboId: c.id }); closeIt(); renderPick(); };
       for (const c of shown) {
         const on = c.id === curId;
-        const it = itemRow(c.name, `${(c.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`, () => {
-          setSetting({ currentComboId: c.id }); closeIt(); renderPick();
-        }, on ? '当前' : '');
+        const it = itemRow(c.name, `${(c.tags || []).map(t => '#' + t).join(' ') || '无标签'} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`, () => use(c), on ? '当前' : '');
         if (on) it.classList.add('on');
-        it.appendChild(ibtn('fa-pen', '编辑', e => { e.stopPropagation(); closeIt(); editCombo(c); }));
+        it.append(
+          favComboBtn(c, () => { drawTags(); draw(); }),
+          ibtn('fa-eye', '查看', e => { e.stopPropagation(); viewCombo(c, { onUse: () => use(c), onEdit: () => { closeIt(); editCombo(c); }, onChange: () => { drawTags(); draw(); } }); }),
+        );
         list.appendChild(it);
       }
     };
@@ -661,6 +670,51 @@ function itemRow(title, desc, onClick, end) {
   item.onclick = onClick;
   return item;
 }
+/** 「爱用」星标按钮：实心 = 爱用 */
+function favComboBtn(c, onChange) {
+  const b = ibtn('fa-star', '', e => { e.stopPropagation(); c.fav = !c.fav; save('combos'); paint(); onChange?.(); });
+  const paint = () => { b.innerHTML = `<i class="${c.fav ? 'fa-solid' : 'fa-regular'} fa-star"></i>`; b.title = c.fav ? '取消爱用' : '标为爱用'; b.setAttribute('aria-label', b.title); b.classList.toggle('xjc-on', !!c.fav); };
+  paint();
+  return b;
+}
+/** 小剧场详情：用了哪些部件（提示词能展开看全文）；底下爱用、编辑、用这个 */
+function viewCombo(c, { onUse, onEdit, onChange } = {}) {
+  openSheet(c.name, (body, foot, closeIt) => {
+    const rc = resolveCombo(c);
+    if ((c.tags || []).length) body.appendChild(el('p', 'xjc-hint', c.tags.map(t => '#' + t).join(' ')));
+    body.appendChild(comboChips(c));
+    const full = (title, text) => { const d = el('details', 'xjc-req-msg'); d.append(el('summary', '', title), el('pre', 'xjc-pre', text || '（空）')); return d; };
+    const pre = byId(state.preambles, rc.preambleId);
+    if (pre) { body.appendChild(el('div', 'xjc-sec', '前置要求')); body.appendChild(full(pre.name, pre.content)); }
+    const parts = comboParts(rc).filter(pt => pt.pool.length);
+    if (!parts.length) body.appendChild(el('div', 'xjc-empty', '这个小剧场还没有提示词'));
+    parts.forEach((pt, i) => {
+      body.appendChild(el('div', 'xjc-sec', `${pt.name || (parts.length > 1 ? `第 ${i + 1} 段` : '提示词')} · ${pt.pick && pt.pool.length > pt.pick ? `随机抽 ${pt.pick} / ${pt.pool.length}` : '全部用'}`));
+      for (const p of pt.pool) body.appendChild(full(p.title, p.content));
+    });
+    if (rc.output?.mode !== 'text') {
+      const sp = byId(state.specs, rc.output.spec);
+      body.appendChild(el('div', 'xjc-sec', 'HTML 规范'));
+      body.appendChild(sp ? full(`${sp.name}${c.output?.spec ? '' : '（跟随全局）'}`, sp.content) : el('p', 'xjc-hint', '不带'));
+    }
+    const fav = btn('', () => { c.fav = !c.fav; save('combos'); paintFav(); onChange?.(); }, 'xjc-btn ghost');
+    const paintFav = () => { fav.textContent = c.fav ? '★ 爱用' : '☆ 爱用'; };
+    paintFav();
+    foot.append(fav, btn('编辑', () => { closeIt(); (onEdit || editCombo)(c); }, 'xjc-btn'));
+    if (onUse) foot.appendChild(btn('用这个', () => { closeIt(); onUse(); }, 'xjc-btn pri'));
+  });
+}
+/** 提示词详情：全文 + 编辑；从「直接用提示词」打开时还能选上 / 去掉 */
+function viewPrompt(p, { isPicked, onToggle, onChange } = {}) {
+  openSheet(p.title, (body, foot, closeIt) => {
+    const meta = [p.group ? `分组：${p.group}` : '', (p.tags || []).map(t => '#' + t).join(' ')].filter(Boolean).join(' · ');
+    if (meta) body.appendChild(el('p', 'xjc-hint', meta));
+    body.appendChild(el('pre', 'xjc-pre xjc-pre-full', p.content || '（空）'));
+    foot.appendChild(btn('编辑', () => { closeIt(); editText('prompts', p, onChange); }, 'xjc-btn'));
+    if (onToggle) foot.appendChild(btn(isPicked() ? '去掉' : '选上', () => { onToggle(); closeIt(); }, 'xjc-btn pri'));
+  });
+}
+
 function libCombos(box) {
   const row = el('div', 'xjc-row');
   row.append(btn('＋ 新建小剧场', () => editCombo(null), 'xjc-btn pri'), btn('导入', importFlow, 'xjc-btn'));
@@ -672,7 +726,7 @@ function libCombos(box) {
     const n = comboPromptIds(c).length;
     const cur = c.id === state.settings.currentComboId;
     const rc = resolveCombo(c);
-    list.appendChild(itemRow(`${c.name}${cur ? ' · 当前' : ''}`, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${rc.channel === 'preset' ? '走酒馆预设' : contextLabel(rc.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`));
+    list.appendChild(itemRow(`${c.fav ? '★ ' : ''}${c.name}${cur ? ' · 当前' : ''}`, `${(c.tags || []).map(t => '#' + t).join(' ')} ${n} 条提示词 · ${rc.channel === 'preset' ? '走酒馆预设' : contextLabel(rc.context)}`, () => editCombo(c), `权重 ${c.weight ?? 1} · ${c.plays || 0} 次${c.lastUsedAt ? ' · ' + fmtTime(c.lastUsedAt) : ''}`));
   }
   box.appendChild(list);
 }
@@ -962,8 +1016,8 @@ function editInstr() {
   });
 }
 
-/** 提示词 / 随机条目 / 前置要求 / HTML 规范 共用一个编辑框 */
-function editText(kind, row) {
+/** 提示词 / 随机条目 / 前置要求 / HTML 规范 共用一个编辑框。onSaved：存了或删了之后（从别的抽屉打开时刷新那边） */
+function editText(kind, row, onSaved) {
   const isSpec = kind === 'specs';
   // 前置要求和 HTML 规范只有名字和内容
   const isPre = kind === 'preambles' || isSpec;
@@ -1008,7 +1062,7 @@ function editText(kind, row) {
           if (isPre && state.settings.defaultPreambleId === row.id) setSetting({ defaultPreambleId: fb });
           save('combos');
         }
-        closeIt(); renderLibrary();
+        closeIt(); renderLibrary(); onSaved?.();
       }, 'xjc-btn danger'));
     }
     foot.appendChild(btn('保存', () => {
@@ -1019,7 +1073,7 @@ function editText(kind, row) {
       if (isSpec && def.input.checked) setSetting({ defaultSpecId: saved.id });
       else if (isPre && def.input.checked) setSetting({ defaultPreambleId: saved.id });
       if (asCombo?.input.checked) combosFromPrompts([saved], { output: { mode: 'mixed' } }).then(() => toast('也建成了一个小剧场'));
-      closeIt(); renderLibrary();
+      closeIt(); renderLibrary(); onSaved?.();
     }, 'xjc-btn pri'));
   });
 }

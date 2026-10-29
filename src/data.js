@@ -59,7 +59,7 @@ function normalizeCombo(c) {
     who: c.who === 'observer' ? 'none' : ['persona', 'custom', 'none'].includes(c.who) ? c.who : '', whoText: str(c.whoText, 2000),
     channel: ['own', 'preset'].includes(c.channel) ? c.channel : '', writeBack: typeof c.writeBack === 'boolean' ? c.writeBack : null,
     plays: num(c.plays && typeof c.plays === 'object' ? Object.values(c.plays).reduce((a, x) => a + (Number(x) || 0), 0) : c.plays ?? c.useCount, 0, 0, 1e9), lastUsedAt: str(c.lastUsedAt, 40),
-    api: typeof c.api === 'string' ? c.api : '', weight: num(c.weight, 1, 0, 100),
+    api: typeof c.api === 'string' ? c.api : '', weight: num(c.weight, 1, 0, 100), fav: c.fav === true,
   };
 }
 const normalizers = {
