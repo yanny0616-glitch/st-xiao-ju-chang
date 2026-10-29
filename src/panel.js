@@ -811,7 +811,8 @@ function fillGroup(kind, g, onChange) {
     if (name) body.appendChild(field('分组名', name));
     const chosen = new Set();
     const list = el('div', 'xjc-list');
-    const rows = state[kind].filter(r => (r.group || '') !== g);
+    // 往已有分组里放：列出不在这个组里的；新建分组：全部列出
+    const rows = g ? state[kind].filter(r => (r.group || '') !== g) : state[kind];
     if (!rows.length) list.appendChild(el('div', 'xjc-empty', `没有别的${label}了`));
     for (const r of rows) {
       const row = el('label', 'xjc-check');
@@ -824,6 +825,11 @@ function fillGroup(kind, g, onChange) {
       list.appendChild(row);
     }
     body.appendChild(field(`勾上要放进来的${label}`, list, g ? '' : '可以先不勾，建好以后在分组标题上点「＋」再放，或者编辑提示词时在「分组」里选。'));
+    if (rows.length) foot.appendChild(btn('全选 / 全不选', () => {
+      const boxes = [...list.querySelectorAll('input[type=checkbox]')];
+      const all = boxes.every(cb => cb.checked);
+      boxes.forEach(cb => { cb.checked = !all; cb.onchange(); });
+    }, 'xjc-btn ghost'));
     foot.appendChild(btn(g ? '放进来' : '新建', async () => {
       const n = g || name.value.trim().slice(0, 30);
       if (!n) { toast('分组名不能空'); return; }
@@ -898,6 +904,8 @@ function renameGroup(kind, g, onChange) {
 }
 const libQuery = { prompts: '', randoms: '' };
 const libTag = { prompts: '', randoms: '' };
+// 批量管理：进入后是选中的 id 集合，平时 null
+const libBatch = { prompts: null, randoms: null };
 /** 提示词 / 随机池共用：搜索、标签筛选、按组显示 */
 function libEntries(box, kind) {
   const label = kind === 'prompts' ? '提示词' : '随机条目';
@@ -905,6 +913,7 @@ function libEntries(box, kind) {
   row.append(btn(`＋ 新增${label}`, () => editText(kind, null), 'xjc-btn pri'));
   if (kind === 'prompts') row.appendChild(btn('批量导入', importFlow, 'xjc-btn'));
   row.appendChild(btn('＋ 新建分组', () => fillGroup(kind, '', renderLibrary), 'xjc-btn'));
+  if (state[kind].length) row.appendChild(btn(libBatch[kind] ? '退出批量' : '批量管理', () => { libBatch[kind] = libBatch[kind] ? null : new Set(); renderLibrary(); }, 'xjc-btn'));
   // 没分过组、但有标签的：一键按第一个标签分好
   const canAuto = state[kind].some(r => !(r.group || '').trim() && (r.tags || []).length);
   if (canAuto) row.appendChild(btn('按第一个标签分组', async () => {
@@ -917,13 +926,50 @@ function libEntries(box, kind) {
   box.appendChild(row);
   if (kind === 'randoms') box.appendChild(el('p', 'xjc-hint', '生成时按小剧场里的「随机」规则从这里抽；「只抽 / 排除」看的是标签。'));
   const list = el('div');
+  const picked = libBatch[kind];
+  let shown = [];
+  const bar = el('div', 'xjc-actions xjc-batch-bar');
   const paint = () => {
     list.innerHTML = '';
     const q = libQuery[kind].trim().toLowerCase();
     const rows = state[kind].filter(r => (!libTag[kind] || (r.tags || []).includes(libTag[kind])) && (!q || [r.title, r.content, r.group, ...(r.tags || [])].join(' ').toLowerCase().includes(q)));
+    shown = rows;
+    paintBar();
     if (!state[kind].length) { list.appendChild(el('div', 'xjc-empty', kind === 'prompts' ? '场景、if 线、文字形式、前端形式都放这里，用分组整理，用标签筛选。' : '随机池是空的。')); return; }
     if (!rows.length) { list.appendChild(el('div', 'xjc-empty', '没有匹配的条目。')); return; }
-    groupedList(list, kind, rows, r => itemRow(`${r.fav ? '★ ' : ''}${r.title}`, `${(r.tags || []).map(t => '#' + t).join(' ')} ${String(r.content || '').replace(/\s+/g, ' ').slice(0, 60)}`, () => editText(kind, r)), { open: !!(q || libTag[kind]), onChange: renderLibrary });
+    const rowOf = r => {
+      const desc = `${(r.tags || []).map(t => '#' + t).join(' ')} ${String(r.content || '').replace(/\s+/g, ' ').slice(0, 60)}`;
+      if (!picked) return itemRow(`${r.fav ? '★ ' : ''}${r.title}`, desc, () => editText(kind, r));
+      // 批量管理时点一行就是勾选
+      const it = itemRow(`${r.fav ? '★ ' : ''}${r.title}`, desc, () => { picked.has(r.id) ? picked.delete(r.id) : picked.add(r.id); paint(); });
+      const cb = el('input', 'xjc-batch-cb');
+      cb.type = 'checkbox';
+      cb.tabIndex = -1;
+      cb.checked = picked.has(r.id);
+      it.prepend(cb);
+      it.classList.toggle('on', cb.checked);
+      return it;
+    };
+    const whole = picked ? (g, inG) => {
+      const all = inG.every(r => picked.has(r.id));
+      return btn(all ? '全不选' : '全选', e => { e.stopPropagation(); inG.forEach(r => (all ? picked.delete(r.id) : picked.add(r.id))); paint(); }, 'xjc-btn sm ghost');
+    } : null;
+    groupedList(list, kind, rows, rowOf, { open: !!(q || libTag[kind] || picked), manage: !picked, headExtra: whole, onChange: renderLibrary });
+  };
+  // 批量管理的操作条：已选几条、全选当前显示的、放进分组、删除
+  const paintBar = () => {
+    bar.hidden = !picked;
+    if (!picked) return;
+    bar.innerHTML = '';
+    const all = shown.length && shown.every(r => picked.has(r.id));
+    bar.append(
+      el('span', 'xjc-grow xjc-batch-n', `已选 ${picked.size} 条`),
+      btn(all ? '全不选' : '全选', () => { shown.forEach(r => (all ? picked.delete(r.id) : picked.add(r.id))); paint(); }, 'xjc-btn sm ghost'),
+    );
+    const mv = btn('放进分组…', () => batchGroup(kind, picked, renderLibrary), 'xjc-btn sm');
+    const del = btn('删除', () => batchDelete(kind, picked, renderLibrary), 'xjc-btn sm danger');
+    mv.disabled = del.disabled = !picked.size;
+    bar.append(mv, del);
   };
   if (state[kind].length > 6) {
     const search = input(libQuery[kind], '搜标题 / 内容 / 分组 / 标签');
@@ -945,8 +991,46 @@ function libEntries(box, kind) {
     box.appendChild(chips);
   }
   list.style.marginTop = '12px';
-  box.appendChild(list);
+  box.append(list, bar);
   paint();
+}
+/** 批量放进分组（选「未分组」就是移出分组） */
+function batchGroup(kind, ids, done) {
+  openSheet(`把 ${ids.size} 条放进分组`, (body, foot, closeIt) => {
+    const g = groupInput(kind, '');
+    body.appendChild(field('放进', g, `选「${UNGROUPED}」就是移出分组。`));
+    foot.appendChild(btn('放进去', async () => {
+      const n = g.value.trim().slice(0, 30);
+      if (!n && g.querySelector('select').value !== '') { toast('新分组的名字不能空'); return; }
+      if (n === UNGROUPED) { toast(`「${UNGROUPED}」是保留的名字`); return; }
+      state[kind].forEach(r => { if (ids.has(r.id)) r.group = n; });
+      await save(kind);
+      toast(`${ids.size} 条放进了「${n || UNGROUPED}」`, 'success');
+      ids.clear();
+      closeIt(); done();
+    }, 'xjc-btn pri'));
+  });
+}
+/** 批量删除；删的提示词从用到它的小剧场里摘掉 */
+async function batchDelete(kind, ids, done) {
+  const label = kind === 'prompts' ? '提示词' : '随机条目';
+  const used = kind === 'prompts' ? state.combos.filter(c => [...ids].some(id => usesPrompt(c, id))).map(c => c.name) : [];
+  const warn = used.length ? `「${used.join('、')}」用到了其中的${label}，删了这些小剧场里就少了它们。` : '';
+  if (!(await confirmSheet('批量删除', `删除选中的 ${ids.size} 条${label}？${warn}删了不能恢复。`, '删除', true))) return;
+  state[kind] = state[kind].filter(r => !ids.has(r.id));
+  const tasks = [save(kind)];
+  if (kind === 'prompts') {
+    if (used.length) {
+      for (const c of state.combos) for (const pt of c.parts || []) pt.items = pt.items.filter(it => !(it.startsWith('p:') && ids.has(it.slice(2))));
+      tasks.push(save('combos'));
+    }
+    const stage = (S().stagePromptIds || []).filter(id => !ids.has(id));
+    if (stage.length !== (S().stagePromptIds || []).length) tasks.push(setSetting({ stagePromptIds: stage }));
+  }
+  await Promise.all(tasks);
+  toast(`删了 ${ids.size} 条`, 'success');
+  ids.clear();
+  done();
 }
 function libPrompts(box) { libEntries(box, 'prompts'); }
 function libRandoms(box) {

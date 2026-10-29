@@ -670,6 +670,24 @@ async function desktop(browser) {
   ok(fromBook.p?.includes('电话亭') && !fromBook.off, '世界书文件里勾的条目导成提示词，没勾的不导');
   ok(fromBook.r?.includes('晴天'), '从酒馆世界书「雨城」直接挑条目导成随机条目');
 
+  // 7d1a. 提示词批量管理：勾几条放进新分组，再移出
+  await page.click('.xjc-view[data-view=library] .xjc-seg button:has-text("提示词")');
+  await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("批量管理")');
+  await page.click('.xjc-view[data-view=library] .xjc-item:has(.t:text-is("天台烟花"))');
+  await page.click('.xjc-view[data-view=library] .xjc-item:has(.t:text-is("打工日记"))');
+  await page.click('.xjc-batch-bar .xjc-btn:has-text("放进分组")');
+  await page.selectOption('.xjc-sheet select', '\u0000new');
+  await page.fill('.xjc-sheet .xjc-grp-pick input', '批量测试');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("放进去")');
+  await sleep(300);
+  ok((await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.filter(p => p.group === '批量测试').length)) === 2, '批量管理：勾两条放进新分组');
+  await page.click('.xjc-grp-hd:has(b:text-is("批量测试")) .xjc-btn:has-text("全选")');
+  await page.click('.xjc-batch-bar .xjc-btn:has-text("放进分组")');
+  await page.click('.xjc-sheet-ft .xjc-btn:has-text("放进去")');
+  await sleep(300);
+  ok((await page.evaluate(async () => (await import('/scripts/extensions/third-party/st-xiao-ju-chang/src/store.js')).state.prompts.filter(p => p.group === '批量测试').length)) === 0, '批量管理：分组标题上全选，选「未分组」移出');
+  await page.click('.xjc-view[data-view=library] .xjc-btn:has-text("退出批量")');
+
   // 7d1b. 「换一个」里可以标爱用、按爱用筛选；小剧场和提示词都能点开看全文
   await page.click('.xjc-tabs button[data-v="stage"]');
   await page.click('.xjc-combo-card .xjc-btn:has-text("换一个")');
